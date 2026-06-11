@@ -17,10 +17,11 @@
           </n-descriptions-item>
           <n-descriptions-item label="分摊月金额">
             {{ formatCurrency(result.grossBonus / 12) }}
-            <n-text depth="3" style="margin-left: 6px">（÷12）</n-text>
+            <n-text depth="3" style="margin-left: 6px">（÷12 查月度税率表）</n-text>
           </n-descriptions-item>
-          <n-descriptions-item label="适用税率">
+          <n-descriptions-item label="适用月度税率">
             <n-tag type="warning">{{ (oneTimeBracket.rate * 100).toFixed(0) }}%</n-tag>
+            <n-text depth="3" style="margin-left: 6px">（{{ formatBracketRange(oneTimeBracket) }}）</n-text>
           </n-descriptions-item>
           <n-descriptions-item label="速算扣除数">
             {{ formatCurrency(oneTimeBracket.quickDeduction) }}
@@ -40,6 +41,10 @@
             </n-text>
           </n-descriptions-item>
         </n-descriptions>
+
+        <n-alert type="info" :show-icon="true" style="margin-top: 12px">
+          月度税率表（÷12后查找）：≤3000→3% | 3000~12000→10% | 12000~25000→20% | 25000~35000→25% | 35000~55000→30% | 55000~80000→35% | &gt;80000→45%
+        </n-alert>
       </n-tab-pane>
 
       <n-tab-pane name="comprehensive" tab="方案二：并入综合所得">
@@ -147,6 +152,12 @@ const oneTimeBracket = computed<TaxBracket>(
     ONE_TIME_TAX_BRACKETS.find((b) => monthlyBonus.value > b.min && monthlyBonus.value <= b.max) ||
     ONE_TIME_TAX_BRACKETS[0]
 )
+
+function formatBracketRange(bracket: TaxBracket): string {
+  const min = bracket.min === 0 ? '0' : (bracket.min / 1000).toFixed(0) + 'k'
+  const max = bracket.max === Infinity ? '以上' : (bracket.max / 1000).toFixed(0) + 'k'
+  return min + '~' + max + '元/月'
+}
 
 const ci = computed(() => props.comprehensiveInfo)
 const taxableWith = computed(

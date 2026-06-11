@@ -1,13 +1,13 @@
 import type { TaxBracket } from '@/types'
 
 export const ONE_TIME_TAX_BRACKETS: TaxBracket[] = [
-  { min: 0, max: 36000, rate: 0.03, quickDeduction: 0 },
-  { min: 36000, max: 144000, rate: 0.1, quickDeduction: 210 },
-  { min: 144000, max: 300000, rate: 0.2, quickDeduction: 1410 },
-  { min: 300000, max: 420000, rate: 0.25, quickDeduction: 2660 },
-  { min: 420000, max: 660000, rate: 0.3, quickDeduction: 4410 },
-  { min: 660000, max: 960000, rate: 0.35, quickDeduction: 7160 },
-  { min: 960000, max: Infinity, rate: 0.45, quickDeduction: 15160 }
+  { min: 0, max: 3000, rate: 0.03, quickDeduction: 0 },
+  { min: 3000, max: 12000, rate: 0.1, quickDeduction: 210 },
+  { min: 12000, max: 25000, rate: 0.2, quickDeduction: 1410 },
+  { min: 25000, max: 35000, rate: 0.25, quickDeduction: 2660 },
+  { min: 35000, max: 55000, rate: 0.3, quickDeduction: 4410 },
+  { min: 55000, max: 80000, rate: 0.35, quickDeduction: 7160 },
+  { min: 80000, max: Infinity, rate: 0.45, quickDeduction: 15160 }
 ]
 
 export const COMPREHENSIVE_TAX_BRACKETS: TaxBracket[] = [
