@@ -129,64 +129,52 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
   {
     title: '单独计税',
     key: 'oneTime',
-    children: [
-      {
-        title: '税费',
-        key: 'taxOneTime',
-        width: 120,
-        render: (row) =>
-          h(
-            'n-tag',
-            {
-              size: 'small',
-              type: row.betterMethod === 'oneTime' ? 'success' : 'default'
-            },
-            { default: () => h('n-text', { type: 'error' }, { default: () => formatCurrency(row.taxOneTime) }) }
-          )
-      },
-      {
-        title: '税后',
-        key: 'netOneTime',
-        width: 130,
-        render: (row) =>
-          h(
-            'n-text',
-            { type: 'success', strong: row.betterMethod === 'oneTime' },
-            { default: () => formatCurrency(row.netBonusOneTime) }
-          )
-      }
-    ]
+    width: 200,
+    render: (row) =>
+      h(
+        'n-space',
+        { size: 8 },
+        {
+          default: () => [
+            h(
+              'n-tag',
+              {
+                size: 'small',
+                type: row.betterMethod === 'oneTime' ? 'success' : 'default'
+              },
+              { default: () => h('n-text', { type: 'error' }, { default: () => `税${formatCurrency(row.taxOneTime)}` }) }
+            ),
+            h('n-text', { type: 'success', strong: row.betterMethod === 'oneTime' }, {
+              default: () => formatCurrency(row.netBonusOneTime)
+            })
+          ]
+        }
+      )
   },
   {
     title: '并入综合',
     key: 'comprehensive',
-    children: [
-      {
-        title: '税费',
-        key: 'taxComp',
-        width: 120,
-        render: (row) =>
-          h(
-            'n-tag',
-            {
-              size: 'small',
-              type: row.betterMethod === 'comprehensive' ? 'success' : 'default'
-            },
-            { default: () => h('n-text', { type: 'error' }, { default: () => formatCurrency(row.taxComprehensive) }) }
-          )
-      },
-      {
-        title: '税后',
-        key: 'netComp',
-        width: 130,
-        render: (row) =>
-          h(
-            'n-text',
-            { type: 'success', strong: row.betterMethod === 'comprehensive' },
-            { default: () => formatCurrency(row.netBonusComprehensive) }
-          )
-      }
-    ]
+    width: 200,
+    render: (row) =>
+      h(
+        'n-space',
+        { size: 8 },
+        {
+          default: () => [
+            h(
+              'n-tag',
+              {
+                size: 'small',
+                type: row.betterMethod === 'comprehensive' ? 'success' : 'default'
+              },
+              { default: () => h('n-text', { type: 'error' }, { default: () => `税${formatCurrency(row.taxComprehensive)}` }) }
+            ),
+            h('n-text', { type: 'success', strong: row.betterMethod === 'comprehensive' }, {
+              default: () => formatCurrency(row.netBonusComprehensive)
+            })
+          ]
+        }
+      )
   },
   {
     title: '更优方案',
