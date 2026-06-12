@@ -35,6 +35,10 @@
           <n-descriptions-item label="工龄加成">
             <n-text type="success">{{ formatCurrency(result.tenureBonus) }}</n-text>
           </n-descriptions-item>
+          <n-descriptions-item label="标签加成">
+            <n-text type="success">{{ formatCurrency(result.tagBonus) }}</n-text>
+            <n-text depth="3" style="margin-left: 8px" v-if="result.tagBonus > 0">基于员工标签额外加成</n-text>
+          </n-descriptions-item>
           <n-descriptions-item label="部门分配调整">
             <n-text :type="result.departmentAllocation >= 0 ? 'success' : 'warning'">
               {{ result.departmentAllocation >= 0 ? '+' : '' }}{{ formatCurrency(result.departmentAllocation) }}

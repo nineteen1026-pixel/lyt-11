@@ -111,6 +111,15 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
       })
   },
   {
+    title: '标签加成',
+    key: 'tagBonus',
+    width: 110,
+    render: (row) =>
+      h('n-text', { type: row.tagBonus > 0 ? 'success' : 'default' }, {
+        default: () => (row.tagBonus > 0 ? '+' : '') + formatCurrency(row.tagBonus)
+      })
+  },
+  {
     title: '部门调整',
     key: 'departmentAllocation',
     width: 110,

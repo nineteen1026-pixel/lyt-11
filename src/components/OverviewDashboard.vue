@@ -154,6 +154,15 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
     render: (row) => h('n-text', { strong: true }, { default: () => formatCurrency(row.grossBonus) })
   },
   {
+    title: '标签加成',
+    key: 'tagBonus',
+    width: 110,
+    render: (row) =>
+      h('n-text', { type: row.tagBonus > 0 ? 'success' : 'default' }, {
+        default: () => (row.tagBonus > 0 ? '+' : '') + formatCurrency(row.tagBonus)
+      })
+  },
+  {
     title: '单独计税',
     key: 'taxOneTime',
     width: 200,

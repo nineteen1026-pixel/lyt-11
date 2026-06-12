@@ -4,6 +4,7 @@ import type {
   PerformanceLevel,
   Department,
   Employee,
+  EmployeeTag,
   BonusPoolConfig,
   PersonalCalculationResult,
   ComprehensiveIncomeInfo,
@@ -27,9 +28,23 @@ export const useBonusStore = defineStore('bonus', () => {
     { id: generateId(), name: 'C', coefficient: 0.5, description: '不合格' }
   ])
 
+  const employeeTags = ref<EmployeeTag[]>([
+    { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d' },
+    { id: generateId(), name: '关键岗位', coefficient: 0.2, description: '担任关键岗位的员工', color: '#fa8c16' },
+    { id: generateId(), name: '新人', coefficient: 0.05, description: '入职不满一年的新员工', color: '#52c41a' },
+    { id: generateId(), name: '管理干部', coefficient: 0.15, description: '承担管理职责的员工', color: '#1890ff' },
+    { id: generateId(), name: '技术骨干', coefficient: 0.25, description: '技术领域深度贡献者', color: '#722ed1' }
+  ])
+
   const dept1Id = generateId()
   const dept2Id = generateId()
   const dept3Id = generateId()
+
+  const tagCoreId = employeeTags.value[0].id
+  const tagKeyId = employeeTags.value[1].id
+  const tagNewId = employeeTags.value[2].id
+  const tagMgrId = employeeTags.value[3].id
+  const tagTechId = employeeTags.value[4].id
 
   const departments = ref<Department[]>([
     {
@@ -44,7 +59,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '技术总监',
           baseSalary: 35000,
           performanceLevelId: performanceLevels.value[0].id,
-          yearsOfService: 8
+          yearsOfService: 8,
+          tagIds: [tagCoreId, tagMgrId, tagTechId]
         },
         {
           id: generateId(),
@@ -53,7 +69,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '高级工程师',
           baseSalary: 25000,
           performanceLevelId: performanceLevels.value[1].id,
-          yearsOfService: 5
+          yearsOfService: 5,
+          tagIds: [tagKeyId, tagTechId]
         },
         {
           id: generateId(),
@@ -62,7 +79,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '中级工程师',
           baseSalary: 18000,
           performanceLevelId: performanceLevels.value[2].id,
-          yearsOfService: 3
+          yearsOfService: 3,
+          tagIds: [tagNewId]
         }
       ]
     },
@@ -78,7 +96,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '市场总监',
           baseSalary: 32000,
           performanceLevelId: performanceLevels.value[1].id,
-          yearsOfService: 10
+          yearsOfService: 10,
+          tagIds: [tagCoreId, tagMgrId]
         },
         {
           id: generateId(),
@@ -87,7 +106,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '市场经理',
           baseSalary: 20000,
           performanceLevelId: performanceLevels.value[2].id,
-          yearsOfService: 4
+          yearsOfService: 4,
+          tagIds: [tagKeyId]
         }
       ]
     },
@@ -103,7 +123,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '运营总监',
           baseSalary: 30000,
           performanceLevelId: performanceLevels.value[0].id,
-          yearsOfService: 7
+          yearsOfService: 7,
+          tagIds: [tagCoreId, tagMgrId]
         },
         {
           id: generateId(),
@@ -112,7 +133,8 @@ export const useBonusStore = defineStore('bonus', () => {
           position: '运营专员',
           baseSalary: 12000,
           performanceLevelId: performanceLevels.value[3].id,
-          yearsOfService: 2
+          yearsOfService: 2,
+          tagIds: []
         }
       ]
     }
@@ -162,6 +184,33 @@ export const useBonusStore = defineStore('bonus', () => {
     performanceLevels.value = performanceLevels.value.filter((l) => l.id !== id)
   }
 
+  function addEmployeeTag(tag: Omit<EmployeeTag, 'id'>) {
+    employeeTags.value.push({ ...tag, id: generateId() })
+  }
+
+  function updateEmployeeTag(id: string, updates: Partial<EmployeeTag>) {
+    const idx = employeeTags.value.findIndex((t) => t.id === id)
+    if (idx !== -1) {
+      employeeTags.value[idx] = { ...employeeTags.value[idx], ...updates }
+    }
+  }
+
+  function removeEmployeeTag(id: string) {
+    employeeTags.value = employeeTags.value.filter((t) => t.id !== id)
+    for (const dept of departments.value) {
+      for (const emp of dept.employees) {
+        emp.tagIds = emp.tagIds.filter((tid) => tid !== id)
+      }
+    }
+  }
+
+  function getTagCoefficient(tagIds: string[]): number {
+    return tagIds.reduce((sum, tid) => {
+      const tag = employeeTags.value.find((t) => t.id === tid)
+      return sum + (tag?.coefficient ?? 0)
+    }, 0)
+  }
+
   function addDepartment(dept: Omit<Department, 'id' | 'employees'>) {
     const newId = generateId()
     departments.value.push({ ...dept, id: newId, employees: [] })
@@ -190,11 +239,11 @@ export const useBonusStore = defineStore('bonus', () => {
     normalizeDepartmentRatios()
   }
 
-  function addEmployee(deptId: string, employee: Omit<Employee, 'id' | 'departmentId'>) {
+  function addEmployee(deptId: string, employee: Omit<Employee, 'id' | 'departmentId' | 'tagIds'>) {
     const dept = departments.value.find((d) => d.id === deptId)
     if (dept) {
       const newId = generateId()
-      dept.employees.push({ ...employee, id: newId, departmentId: deptId })
+      dept.employees.push({ ...employee, id: newId, departmentId: deptId, tagIds: [] })
       comprehensiveIncome.value[newId] = {
         annualSalary: employee.baseSalary * 12,
         specialDeduction: employee.baseSalary * 12 * 0.22,
@@ -289,7 +338,8 @@ export const useBonusStore = defineStore('bonus', () => {
     const base = employee.baseSalary * bonusPool.value.baseRatio
     const performance = base * getPerformanceCoefficient(employee.performanceLevelId) * bonusPool.value.performanceRatio
     const tenure = base * Math.min(employee.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
-    return round2(base + performance + tenure)
+    const tagBonus = base * getTagCoefficient(employee.tagIds)
+    return round2(base + performance + tenure + tagBonus)
   }
 
   const calculationResults = computed<PersonalCalculationResult[]>(() => {
@@ -316,7 +366,8 @@ export const useBonusStore = defineStore('bonus', () => {
         const tenureBonus = round2(
           base * Math.min(emp.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
         )
-        const baseAmount = round2(base + performanceBonus + tenureBonus)
+        const tagBonus = round2(base * getTagCoefficient(emp.tagIds))
+        const baseAmount = round2(base + performanceBonus + tenureBonus + tagBonus)
         const scaleFactor = deptAlloc / deptBaseTotal
         const grossBonus = round2(baseAmount * scaleFactor)
 
@@ -356,6 +407,7 @@ export const useBonusStore = defineStore('bonus', () => {
           baseAmount: round2(base),
           performanceBonus,
           tenureBonus,
+          tagBonus,
           departmentAllocation: round2(baseAmount * (scaleFactor - 1)),
           grossBonus,
           taxOneTime,
@@ -388,6 +440,7 @@ export const useBonusStore = defineStore('bonus', () => {
   function exportData(): AppData {
     return {
       performanceLevels: performanceLevels.value,
+      employeeTags: employeeTags.value,
       departments: departments.value,
       bonusPool: bonusPool.value,
       comprehensiveIncome: comprehensiveIncome.value
@@ -400,7 +453,14 @@ export const useBonusStore = defineStore('bonus', () => {
         return false
       }
       performanceLevels.value = data.performanceLevels
-      departments.value = data.departments
+      employeeTags.value = data.employeeTags || []
+      departments.value = data.departments.map((d) => ({
+        ...d,
+        employees: d.employees.map((e) => ({
+          ...e,
+          tagIds: e.tagIds || []
+        }))
+      }))
       bonusPool.value = data.bonusPool
       comprehensiveIncome.value = data.comprehensiveIncome || {}
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
@@ -412,6 +472,7 @@ export const useBonusStore = defineStore('bonus', () => {
 
   return {
     performanceLevels,
+    employeeTags,
     departments,
     bonusPool,
     comprehensiveIncome,
@@ -426,6 +487,10 @@ export const useBonusStore = defineStore('bonus', () => {
     addPerformanceLevel,
     updatePerformanceLevel,
     removePerformanceLevel,
+    addEmployeeTag,
+    updateEmployeeTag,
+    removeEmployeeTag,
+    getTagCoefficient,
     addDepartment,
     updateDepartment,
     removeDepartment,

@@ -12,6 +12,14 @@ export interface Department {
   employees: Employee[]
 }
 
+export interface EmployeeTag {
+  id: string
+  name: string
+  coefficient: number
+  description?: string
+  color?: string
+}
+
 export interface Employee {
   id: string
   name: string
@@ -20,6 +28,7 @@ export interface Employee {
   baseSalary: number
   performanceLevelId: string
   yearsOfService: number
+  tagIds: string[]
 }
 
 export interface BonusPoolConfig {
@@ -39,6 +48,7 @@ export interface PersonalCalculationResult {
   baseAmount: number
   performanceBonus: number
   tenureBonus: number
+  tagBonus: number
   departmentAllocation: number
   grossBonus: number
   taxOneTime: number
@@ -65,6 +75,7 @@ export interface TaxBracket {
 
 export interface AppData {
   performanceLevels: PerformanceLevel[]
+  employeeTags: EmployeeTag[]
   departments: Department[]
   bonusPool: BonusPoolConfig
   comprehensiveIncome: Record<string, ComprehensiveIncomeInfo>

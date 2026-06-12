@@ -11,6 +11,7 @@ declare module 'vue' {
     AppContent: typeof import('./src/components/AppContent.vue')['default']
     BonusPoolConfig: typeof import('./src/components/BonusPoolConfig.vue')['default']
     EmployeeDetail: typeof import('./src/components/EmployeeDetail.vue')['default']
+    EmployeeTagConfig: typeof import('./src/components/EmployeeTagConfig.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
     NAvatar: typeof import('naive-ui')['NAvatar']
     NButton: typeof import('naive-ui')['NButton']

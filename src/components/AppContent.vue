@@ -64,6 +64,10 @@
               <PerformanceCoefficientTable />
             </template>
 
+            <template v-else-if="activeMenu === 'tags'">
+              <EmployeeTagConfig />
+            </template>
+
             <template v-else-if="activeMenu === 'pool'">
               <BonusPoolConfig />
             </template>
@@ -114,7 +118,8 @@ import {
   FundOutlined,
   TableOutlined,
   ImportOutlined,
-  ExportOutlined
+  ExportOutlined,
+  TagsOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import PerformanceCoefficientTable from '@/components/PerformanceCoefficientTable.vue'
@@ -122,6 +127,7 @@ import BonusPoolConfig from '@/components/BonusPoolConfig.vue'
 import EmployeeDetail from '@/components/EmployeeDetail.vue'
 import OverviewDashboard from '@/components/OverviewDashboard.vue'
 import AllResultsTable from '@/components/AllResultsTable.vue'
+import EmployeeTagConfig from '@/components/EmployeeTagConfig.vue'
 import dayjs from 'dayjs'
 import type { AppData } from '@/types'
 
@@ -144,6 +150,11 @@ const menuOptions: MenuOption[] = [
     icon: () => h(StarOutlined)
   },
   {
+    label: '员工标签管理',
+    key: 'tags',
+    icon: () => h(TagsOutlined)
+  },
+  {
     label: '奖金池与分配',
     key: 'pool',
     icon: () => h(FundOutlined)
@@ -164,6 +175,7 @@ const currentTitle = computed(() => {
   const map: Record<string, string> = {
     overview: '📊 总览面板',
     performance: '⭐ 绩效系数配置',
+    tags: '🏷️ 员工标签管理',
     pool: '💰 奖金池与分配配置',
     calculate: '🧮 个人年终奖测算',
     all: '📋 全员年终奖测算表'

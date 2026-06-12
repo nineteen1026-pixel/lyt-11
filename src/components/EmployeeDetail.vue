@@ -58,6 +58,31 @@
                 style="width: 100%"
               />
             </n-form-item>
+            <n-form-item label="员工标签">
+              <n-select
+                :value="employee!.tagIds"
+                @update:value="(v: string[]) => store.updateEmployee(employee!.id, { tagIds: v })"
+                :options="tagOptions"
+                multiple
+                placeholder="选择标签，可多选"
+              />
+            </n-form-item>
+            <n-form-item v-if="employee!.tagIds.length > 0" label="标签加成合计">
+              <n-space>
+                <n-tag
+                  v-for="tag in employeeTags"
+                  :key="tag.id"
+                  :color="{ color: tag.color || '#1890ff', textColor: '#fff' }"
+                  round
+                  size="small"
+                >
+                  {{ tag.name }} +{{ (tag.coefficient * 100).toFixed(0) }}%
+                </n-tag>
+                <n-tag type="success" round size="small">
+                  合计 +{{ (totalTagCoefficient * 100).toFixed(0) }}%
+                </n-tag>
+              </n-space>
+            </n-form-item>
           </n-form>
 
           <n-card title="综合所得信息（用于计税）" size="small" embedded>
@@ -126,7 +151,7 @@ import { computed, watch, reactive } from 'vue'
 import { useBonusStore } from '@/stores/bonus'
 import PersonalCalculation from './PersonalCalculation.vue'
 import TaxComparisonPanel from './TaxComparisonPanel.vue'
-import type { ComprehensiveIncomeInfo, Employee } from '@/types'
+import type { ComprehensiveIncomeInfo, Employee, EmployeeTag } from '@/types'
 
 const store = useBonusStore()
 
@@ -161,6 +186,20 @@ const performanceLevelOptions = computed(() =>
     value: l.id
   }))
 )
+
+const tagOptions = computed(() =>
+  store.employeeTags.map((t) => ({
+    label: `${t.name} (+${(t.coefficient * 100).toFixed(0)}%)`,
+    value: t.id
+  }))
+)
+
+const employeeTags = computed<EmployeeTag[]>(() => {
+  if (!employee.value) return []
+  return store.employeeTags.filter((t) => employee.value!.tagIds.includes(t.id))
+})
+
+const totalTagCoefficient = computed(() => store.getTagCoefficient(employee.value?.tagIds || []))
 
 const defaultCI = (): ComprehensiveIncomeInfo => ({
   annualSalary: 0,
