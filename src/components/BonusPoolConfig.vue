@@ -33,6 +33,42 @@
               当前：{{ (store.bonusPool.tenureRatio * 100).toFixed(0) }}%（每满1年加5%，上限50%）
             </n-text>
           </n-form-item>
+
+          <n-divider />
+
+          <n-form-item label="单人奖金封顶">
+            <n-space align="center">
+              <n-switch v-model:value="store.bonusPool.capEnabled" />
+              <n-input-number
+                v-model:value="store.bonusPool.capAmount"
+                :min="0"
+                :step="10000"
+                :disabled="!store.bonusPool.capEnabled"
+                style="width: 200px"
+                show-group-separator
+              />
+              <n-text type="info" v-if="store.bonusPool.capEnabled">
+                超过 {{ formatCurrency(store.bonusPool.capAmount) }} 的部分按比例平摊给其他人
+              </n-text>
+            </n-space>
+          </n-form-item>
+
+          <n-form-item label="单人奖金保底">
+            <n-space align="center">
+              <n-switch v-model:value="store.bonusPool.floorEnabled" />
+              <n-input-number
+                v-model:value="store.bonusPool.floorAmount"
+                :min="0"
+                :step="1000"
+                :disabled="!store.bonusPool.floorEnabled"
+                style="width: 200px"
+                show-group-separator
+              />
+              <n-text type="info" v-if="store.bonusPool.floorEnabled">
+                不足 {{ formatCurrency(store.bonusPool.floorAmount) }} 的差额按比例从其他人扣除
+              </n-text>
+            </n-space>
+          </n-form-item>
         </n-form>
 
         <n-divider />

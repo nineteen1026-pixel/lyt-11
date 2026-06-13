@@ -9,7 +9,8 @@ import type {
   PersonalCalculationResult,
   ComprehensiveIncomeInfo,
   TaxMethod,
-  AppData
+  AppData,
+  AdjustmentType
 } from '@/types'
 import {
   generateId,
@@ -149,7 +150,11 @@ export const useBonusStore = defineStore('bonus', () => {
     },
     baseRatio: 3,
     performanceRatio: 0.5,
-    tenureRatio: 0.1
+    tenureRatio: 0.1,
+    capEnabled: false,
+    capAmount: 500000,
+    floorEnabled: false,
+    floorAmount: 10000
   })
 
   const comprehensiveIncome = ref<Record<string, ComprehensiveIncomeInfo>>({})
@@ -343,7 +348,18 @@ export const useBonusStore = defineStore('bonus', () => {
   }
 
   const calculationResults = computed<PersonalCalculationResult[]>(() => {
-    const results: PersonalCalculationResult[] = []
+    type RawCalc = {
+      employeeId: string
+      employeeName: string
+      departmentName: string
+      baseAmount: number
+      performanceBonus: number
+      tenureBonus: number
+      tagBonus: number
+      departmentAllocation: number
+      grossBonus: number
+    }
+    const rawResults: RawCalc[] = []
     const deptBaseTotals: Record<string, number> = {}
 
     for (const dept of departments.value) {
@@ -370,37 +386,7 @@ export const useBonusStore = defineStore('bonus', () => {
         const baseAmount = round2(base + performanceBonus + tenureBonus + tagBonus)
         const scaleFactor = deptAlloc / deptBaseTotal
         const grossBonus = round2(baseAmount * scaleFactor)
-
-        const taxOneTime = round2(calculateOneTimeTax(grossBonus))
-        const netBonusOneTime = round2(grossBonus - taxOneTime)
-
-        const ci = comprehensiveIncome.value[emp.id] || {
-          annualSalary: emp.baseSalary * 12,
-          specialDeduction: 0,
-          specialAdditionalDeduction: 0,
-          otherDeduction: 0
-        }
-        const compResult = calculateComprehensiveTax(
-          ci.annualSalary,
-          grossBonus,
-          ci.specialDeduction,
-          ci.specialAdditionalDeduction,
-          ci.otherDeduction
-        )
-        const taxComprehensive = round2(compResult.taxDifference)
-        const netBonusComprehensive = round2(grossBonus - taxComprehensive)
-
-        let betterMethod: TaxMethod = 'oneTime'
-        let savedTax = 0
-        if (taxOneTime < taxComprehensive) {
-          betterMethod = 'oneTime'
-          savedTax = round2(taxComprehensive - taxOneTime)
-        } else if (taxComprehensive < taxOneTime) {
-          betterMethod = 'comprehensive'
-          savedTax = round2(taxOneTime - taxComprehensive)
-        }
-
-        results.push({
+        rawResults.push({
           employeeId: emp.id,
           employeeName: emp.name,
           departmentName: dept.name,
@@ -409,16 +395,114 @@ export const useBonusStore = defineStore('bonus', () => {
           tenureBonus,
           tagBonus,
           departmentAllocation: round2(baseAmount * (scaleFactor - 1)),
-          grossBonus,
-          taxOneTime,
-          netBonusOneTime,
-          taxComprehensive,
-          netBonusComprehensive,
-          betterMethod,
-          savedTax
+          grossBonus
         })
       }
     }
+
+    const { capEnabled, capAmount, floorEnabled, floorAmount } = bonusPool.value
+
+    type AdjustedCalc = RawCalc & {
+      originalGrossBonus: number
+      adjustmentType: AdjustmentType
+      adjustmentAmount: number
+    }
+
+    let redistributedPool = 0
+    const adjusted: AdjustedCalc[] = rawResults.map((r) => {
+      let gross = r.grossBonus
+      let adjType: AdjustmentType = 'none'
+      let adjAmount = 0
+
+      if (capEnabled && gross > capAmount) {
+        adjType = 'capped'
+        adjAmount = capAmount - gross
+        redistributedPool += gross - capAmount
+        gross = capAmount
+      } else if (floorEnabled && gross < floorAmount) {
+        adjType = 'floored'
+        adjAmount = floorAmount - gross
+        redistributedPool -= floorAmount - gross
+        gross = floorAmount
+      }
+
+      return {
+        ...r,
+        originalGrossBonus: r.grossBonus,
+        adjustmentType: adjType,
+        adjustmentAmount: adjAmount,
+        grossBonus: gross
+      }
+    })
+
+    if (Math.abs(redistributedPool) > 0.01) {
+      const adjustableList = adjusted.filter((r) => r.adjustmentType === 'none')
+      const adjustableTotal = adjustableList.reduce((s, r) => s + r.grossBonus, 0)
+
+      if (adjustableList.length > 0 && adjustableTotal > 0) {
+        const unit = redistributedPool / adjustableTotal
+        for (const r of adjustableList) {
+          const delta = round2(r.grossBonus * unit)
+          r.grossBonus = round2(r.grossBonus + delta)
+          r.adjustmentAmount = round2(r.adjustmentAmount + delta)
+        }
+      }
+    }
+
+    const results: PersonalCalculationResult[] = adjusted.map((r) => {
+      const grossBonus = r.grossBonus
+      const taxOneTime = round2(calculateOneTimeTax(grossBonus))
+      const netBonusOneTime = round2(grossBonus - taxOneTime)
+
+      const emp = getEmployeeById(r.employeeId)
+      const ci = comprehensiveIncome.value[r.employeeId] || {
+        annualSalary: emp?.baseSalary ? emp.baseSalary * 12 : 0,
+        specialDeduction: 0,
+        specialAdditionalDeduction: 0,
+        otherDeduction: 0
+      }
+      const compResult = calculateComprehensiveTax(
+        ci.annualSalary,
+        grossBonus,
+        ci.specialDeduction,
+        ci.specialAdditionalDeduction,
+        ci.otherDeduction
+      )
+      const taxComprehensive = round2(compResult.taxDifference)
+      const netBonusComprehensive = round2(grossBonus - taxComprehensive)
+
+      let betterMethod: TaxMethod = 'oneTime'
+      let savedTax = 0
+      if (taxOneTime < taxComprehensive) {
+        betterMethod = 'oneTime'
+        savedTax = round2(taxComprehensive - taxOneTime)
+      } else if (taxComprehensive < taxOneTime) {
+        betterMethod = 'comprehensive'
+        savedTax = round2(taxOneTime - taxComprehensive)
+      }
+
+      return {
+        employeeId: r.employeeId,
+        employeeName: r.employeeName,
+        departmentName: r.departmentName,
+        baseAmount: r.baseAmount,
+        performanceBonus: r.performanceBonus,
+        tenureBonus: r.tenureBonus,
+        tagBonus: r.tagBonus,
+        departmentAllocation: r.departmentAllocation,
+        originalGrossBonus: r.originalGrossBonus,
+        adjustmentType: r.adjustmentType,
+        adjustmentAmount: r.adjustmentAmount,
+        grossBonus,
+        taxOneTime,
+        netBonusOneTime,
+        taxComprehensive,
+        netBonusComprehensive,
+        betterMethod,
+        savedTax
+      }
+    })
+
     return results
   })
 

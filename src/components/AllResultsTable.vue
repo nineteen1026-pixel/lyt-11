@@ -85,7 +85,84 @@ const sortKey = ref('grossBonusDesc')
 
 const columns: DataTableColumns<PersonalCalculationResult> = [
   { title: '部门', key: 'departmentName', width: 130, fixed: 'left' },
-  { title: '姓名', key: 'employeeName', width: 90, fixed: 'left' },
+  {
+    title: '姓名',
+    key: 'employeeName',
+    width: 160,
+    fixed: 'left',
+    render: (row) =>
+      h(
+        'n-space',
+        { size: 6, align: 'center' },
+        {
+          default: () => {
+            const children = [h('span', {}, row.employeeName)]
+            if (row.adjustmentType === 'capped') {
+              children.push(
+                h(
+                  'n-tag',
+                  { size: 'small', type: 'warning', round: true },
+                  { default: () => '已封顶' }
+                )
+              )
+            } else if (row.adjustmentType === 'floored') {
+              children.push(
+                h(
+                  'n-tag',
+                  { size: 'small', type: 'success', round: true },
+                  { default: () => '已保底' }
+                )
+              )
+            } else if (Math.abs(row.adjustmentAmount) > 0.01) {
+              children.push(
+                h(
+                  'n-tooltip',
+                  { trigger: 'hover' },
+                  {
+                    default: () =>
+                      h(
+                        'n-tag',
+                        { size: 'small', type: 'info', round: true },
+                        { default: () => '平账调整' }
+                      ),
+                    trigger: () =>
+                      `平账调整${row.adjustmentAmount >= 0 ? '+' : ''}${formatCurrency(row.adjustmentAmount)}`
+                  }
+                )
+              )
+            }
+            return children
+          }
+        }
+      )
+  },
+  {
+    title: '原始税前',
+    key: 'originalGrossBonus',
+    width: 120,
+    render: (row) => {
+      if (row.adjustmentType === 'none' && Math.abs(row.adjustmentAmount) <= 0.01) {
+        return h('n-text', { depth: 3 }, { default: () => '-' })
+      }
+      return h('n-text', { depth: 3, style: 'text-decoration: line-through' }, {
+        default: () => formatCurrency(row.originalGrossBonus)
+      })
+    }
+  },
+  {
+    title: '调整额',
+    key: 'adjustmentAmount',
+    width: 110,
+    render: (row) => {
+      if (Math.abs(row.adjustmentAmount) <= 0.01) {
+        return h('n-text', { depth: 3 }, { default: () => '-' })
+      }
+      const type = row.adjustmentAmount >= 0 ? 'success' : 'warning'
+      return h('n-text', { type, strong: true }, {
+        default: () => (row.adjustmentAmount >= 0 ? '+' : '') + formatCurrency(row.adjustmentAmount)
+      })
+    }
+  },
   {
     title: '基础',
     key: 'baseAmount',

@@ -37,9 +37,15 @@ export interface BonusPoolConfig {
   baseRatio: number
   performanceRatio: number
   tenureRatio: number
+  capEnabled: boolean
+  capAmount: number
+  floorEnabled: boolean
+  floorAmount: number
 }
 
 export type TaxMethod = 'oneTime' | 'comprehensive'
+
+export type AdjustmentType = 'none' | 'capped' | 'floored'
 
 export interface PersonalCalculationResult {
   employeeId: string
@@ -50,6 +56,9 @@ export interface PersonalCalculationResult {
   tenureBonus: number
   tagBonus: number
   departmentAllocation: number
+  originalGrossBonus: number
+  adjustmentType: AdjustmentType
+  adjustmentAmount: number
   grossBonus: number
   taxOneTime: number
   netBonusOneTime: number

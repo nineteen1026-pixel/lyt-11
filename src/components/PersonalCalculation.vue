@@ -44,6 +44,36 @@
               {{ result.departmentAllocation >= 0 ? '+' : '' }}{{ formatCurrency(result.departmentAllocation) }}
             </n-text>
           </n-descriptions-item>
+          <n-descriptions-item
+            v-if="result.adjustmentType === 'capped'"
+            label="封顶调整"
+            label-style="background: #fff7e6"
+          >
+            <n-tag type="warning">已封顶</n-tag>
+            <n-text type="warning" style="margin-left: 8px">
+              原始 {{ formatCurrency(result.originalGrossBonus) }} → 调整 {{ formatCurrency(result.adjustmentAmount) }}
+            </n-text>
+          </n-descriptions-item>
+          <n-descriptions-item
+            v-else-if="result.adjustmentType === 'floored'"
+            label="保底调整"
+            label-style="background: #f6ffed"
+          >
+            <n-tag type="success">已保底</n-tag>
+            <n-text type="success" style="margin-left: 8px">
+              原始 {{ formatCurrency(result.originalGrossBonus) }} → 调整 +{{ formatCurrency(result.adjustmentAmount) }}
+            </n-text>
+          </n-descriptions-item>
+          <n-descriptions-item
+            v-else-if="Math.abs(result.adjustmentAmount) > 0.01"
+            label="平账调整"
+            label-style="background: #e6f7ff"
+          >
+            <n-tag type="info">平账重分</n-tag>
+            <n-text :type="result.adjustmentAmount >= 0 ? 'success' : 'warning'" style="margin-left: 8px">
+              {{ result.adjustmentAmount >= 0 ? '+' : '' }}{{ formatCurrency(result.adjustmentAmount) }}
+            </n-text>
+          </n-descriptions-item>
           <n-descriptions-item label="年终奖税前总额" label-style="font-weight: 600">
             <n-text strong style="font-size: 18px; color: #d03050">
               {{ formatCurrency(result.grossBonus) }}
