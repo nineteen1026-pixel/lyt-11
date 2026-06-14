@@ -1,5 +1,6 @@
 <template>
   <n-space vertical :size="16" style="width: 100%">
+    <TagExpiryWarning />
     <n-select
       v-model:value="selectedId"
       :options="employeeOptions"
@@ -151,6 +152,7 @@ import { computed, watch, reactive } from 'vue'
 import { useBonusStore } from '@/stores/bonus'
 import PersonalCalculation from './PersonalCalculation.vue'
 import TaxComparisonPanel from './TaxComparisonPanel.vue'
+import TagExpiryWarning from '@/components/TagExpiryWarning.vue'
 import type { ComprehensiveIncomeInfo, Employee, EmployeeTag } from '@/types'
 
 const store = useBonusStore()

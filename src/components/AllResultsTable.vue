@@ -1,79 +1,82 @@
 <template>
-  <n-card title="全员年终奖测算表" :bordered="false">
-    <template #header-extra>
-      <n-space>
-        <n-input
-          v-model:value="keyword"
-          placeholder="搜索姓名 / 部门"
-          clearable
-          style="width: 220px"
-        >
-          <template #prefix><SearchOutlined /></template>
-        </n-input>
-        <n-select
-          v-model:value="filterImpact"
-          placeholder="调薪影响"
-          style="width: 160px"
-          :options="[
-            { label: '全部员工', value: 'all' },
-            { label: '有调薪影响', value: 'has_impact' },
-            { label: '无调薪影响', value: 'no_impact' }
-          ]"
+  <n-space vertical :size="16" style="width: 100%">
+    <TagExpiryWarning />
+    <n-card title="全员年终奖测算表" :bordered="false">
+      <template #header-extra>
+        <n-space>
+          <n-input
+            v-model:value="keyword"
+            placeholder="搜索姓名 / 部门"
+            clearable
+            style="width: 220px"
+          >
+            <template #prefix><SearchOutlined /></template>
+          </n-input>
+          <n-select
+            v-model:value="filterImpact"
+            placeholder="调薪影响"
+            style="width: 160px"
+            :options="[
+              { label: '全部员工', value: 'all' },
+              { label: '有调薪影响', value: 'has_impact' },
+              { label: '无调薪影响', value: 'no_impact' }
+            ]"
+          />
+          <n-select
+            v-model:value="filterMethod"
+            placeholder="计税方案"
+            style="width: 180px"
+            :options="[
+              { label: '全部', value: '' },
+              { label: '单独计税更优', value: 'oneTime' },
+              { label: '并入综合更优', value: 'comprehensive' }
+            ]"
+            clearable
+          />
+          <n-select
+            v-model:value="sortKey"
+            placeholder="排序方式"
+            style="width: 180px"
+            :options="[
+              { label: '税前金额 高→低', value: 'grossBonusDesc' },
+              { label: '税前金额 低→高', value: 'grossBonusAsc' },
+              { label: '省税金额 高→低', value: 'savedDesc' }
+            ]"
+          />
+        </n-space>
+      </template>
+
+      <n-spin :show="loading">
+        <n-data-table
+          :columns="columns"
+          :data="filteredData"
+          :pagination="{ pageSize: 20, showSizePicker: true, pageSizes: [10, 20, 50, 100] }"
+          :bordered="false"
+          striped
+          row-key="employeeId"
         />
-        <n-select
-          v-model:value="filterMethod"
-          placeholder="计税方案"
-          style="width: 180px"
-          :options="[
-            { label: '全部', value: '' },
-            { label: '单独计税更优', value: 'oneTime' },
-            { label: '并入综合更优', value: 'comprehensive' }
-          ]"
-          clearable
-        />
-        <n-select
-          v-model:value="sortKey"
-          placeholder="排序方式"
-          style="width: 180px"
-          :options="[
-            { label: '税前金额 高→低', value: 'grossBonusDesc' },
-            { label: '税前金额 低→高', value: 'grossBonusAsc' },
-            { label: '省税金额 高→低', value: 'savedDesc' }
-          ]"
-        />
+      </n-spin>
+
+      <n-divider />
+
+      <n-space justify="space-between" style="width: 100%">
+        <n-text depth="3">
+          共 {{ filteredData.length }} 条记录
+        </n-text>
+        <n-space>
+          <n-statistic label="税前合计" :value="sumBy('grossBonus')" style="min-width: 160px">
+            <template #suffix>元</template>
+          </n-statistic>
+          <n-statistic label="最少税费合计" :value="sumMinTax" :value-style="{ color: '#d03050' }" style="min-width: 160px">
+            <template #suffix>元</template>
+          </n-statistic>
+          <n-statistic label="最多省税合计" :value="sumBy('savedTax')" :value-style="{ color: '#18a058' }" style="min-width: 160px">
+            <template #suffix>元</template>
+          </n-statistic>
+        </n-space>
       </n-space>
-    </template>
-
-    <n-spin :show="loading">
-      <n-data-table
-        :columns="columns"
-        :data="filteredData"
-        :pagination="{ pageSize: 20, showSizePicker: true, pageSizes: [10, 20, 50, 100] }"
-        :bordered="false"
-        striped
-        row-key="employeeId"
-      />
-    </n-spin>
-
-    <n-divider />
-
-    <n-space justify="space-between" style="width: 100%">
-      <n-text depth="3">
-        共 {{ filteredData.length }} 条记录
-      </n-text>
-      <n-space>
-        <n-statistic label="税前合计" :value="sumBy('grossBonus')" style="min-width: 160px">
-          <template #suffix>元</template>
-        </n-statistic>
-        <n-statistic label="最少税费合计" :value="sumMinTax" :value-style="{ color: '#d03050' }" style="min-width: 160px">
-          <template #suffix>元</template>
-        </n-statistic>
-        <n-statistic label="最多省税合计" :value="sumBy('savedTax')" :value-style="{ color: '#18a058' }" style="min-width: 160px">
-          <template #suffix>元</template>
-        </n-statistic>
-      </n-space>
-    </n-space>
-  </n-card>
+    </n-card>
+  </n-space>
 </template>
 
 <script setup lang="ts">
@@ -85,6 +88,7 @@ import { useBonusStore } from '@/stores/bonus'
 import type { PersonalCalculationResult, TaxMethod } from '@/types'
 import { formatCurrency } from '@/utils/tax'
 import dayjs from 'dayjs'
+import TagExpiryWarning from '@/components/TagExpiryWarning.vue'
 
 const store = useBonusStore()
 const message = useMessage()
