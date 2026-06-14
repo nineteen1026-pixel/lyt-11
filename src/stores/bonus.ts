@@ -11,7 +11,11 @@ import type {
   TaxMethod,
   AppData,
   AdjustmentType,
-  BonusImpactSource
+  BonusImpactSource,
+  PerformanceDistributionRatio,
+  CalibrationResult,
+  CalibrationEmployee,
+  CalibrationScope
 } from '@/types'
 import {
   generateId,
@@ -30,6 +34,35 @@ export const useBonusStore = defineStore('bonus', () => {
     { id: generateId(), name: 'B', coefficient: 0.8, description: '待改进' },
     { id: generateId(), name: 'C', coefficient: 0.5, description: '不合格' }
   ])
+
+  const performanceDistributionRatios = ref<PerformanceDistributionRatio[]>([
+    { levelId: '', levelName: 'S', maxRatio: 0.1 },
+    { levelId: '', levelName: 'A+', maxRatio: 0.2 },
+    { levelId: '', levelName: 'A', maxRatio: 0.3 },
+    { levelId: '', levelName: 'B+', maxRatio: 0.25 },
+    { levelId: '', levelName: 'B', maxRatio: 0.1 },
+    { levelId: '', levelName: 'C', maxRatio: 0.05 }
+  ])
+
+  const calibrationResults = ref<CalibrationResult[]>([])
+  const currentCalibration = ref<CalibrationResult | null>(null)
+  const calibrationYear = ref(dayjs().year())
+  const calibrationHalf = ref<'first' | 'second' | 'annual'>('annual')
+  const calibrationScope = ref<CalibrationScope>('company')
+  const calibrationDeptId = ref<string | null>(null)
+
+  function initDistributionRatios() {
+    performanceDistributionRatios.value = performanceLevels.value.map((level, index) => {
+      const defaultRatios = [0.1, 0.2, 0.3, 0.25, 0.1, 0.05]
+      return {
+        levelId: level.id,
+        levelName: level.name,
+        maxRatio: defaultRatios[index] ?? 0.1
+      }
+    })
+  }
+
+  initDistributionRatios()
 
   const employeeTags = ref<EmployeeTag[]>([
     { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d' },
@@ -631,13 +664,242 @@ export const useBonusStore = defineStore('bonus', () => {
     round2(calculationResults.value.reduce((s, r) => s + r.taxComprehensive, 0))
   )
 
+  function updateDistributionRatio(levelId: string, maxRatio: number) {
+    const idx = performanceDistributionRatios.value.findIndex((r) => r.levelId === levelId)
+    if (idx !== -1) {
+      performanceDistributionRatios.value[idx].maxRatio = maxRatio
+    }
+  }
+
+  function calculateSortScore(employee: Employee): number {
+    const level = performanceLevels.value.find((l) => l.id === employee.performanceLevelId)
+    const levelScore = level ? level.coefficient : 1
+    const salaryScore = employee.baseSalary / 10000
+    const tenureScore = Math.min(employee.yearsOfService, 10) * 0.1
+    return levelScore * 10 + salaryScore * 0.5 + tenureScore
+  }
+
+  function getCalibrationEmployees(scope: CalibrationScope, scopeId: string): Employee[] {
+    if (scope === 'company') {
+      return allEmployees.value
+    }
+    const dept = departments.value.find((d) => d.id === scopeId)
+    return dept ? dept.employees : []
+  }
+
+  function startCalibration() {
+    const scopeId = calibrationScope.value === 'company' ? 'company' : (calibrationDeptId.value || '')
+    const scopeName = calibrationScope.value === 'company'
+      ? '全公司'
+      : (getDepartmentById(scopeId)?.name || '未知部门')
+
+    const employees = getCalibrationEmployees(calibrationScope.value, scopeId)
+
+    const calibratedEmployees: CalibrationEmployee[] = employees.map((emp, index) => {
+      const level = performanceLevels.value.find((l) => l.id === emp.performanceLevelId)
+      const dept = getDepartmentById(emp.departmentId)
+      return {
+        employeeId: emp.id,
+        employeeName: emp.name,
+        departmentId: emp.departmentId,
+        departmentName: dept?.name || '',
+        position: emp.position,
+        baseSalary: emp.baseSalary,
+        currentLevelId: emp.performanceLevelId,
+        currentLevelName: level?.name || '',
+        currentCoefficient: level?.coefficient || 1,
+        calibratedLevelId: null,
+        calibratedLevelName: null,
+        calibratedCoefficient: null,
+        sortScore: calculateSortScore(emp),
+        originalRank: index + 1,
+        calibratedRank: null,
+        changed: false
+      }
+    })
+
+    calibratedEmployees.sort((a, b) => b.sortScore - a.sortScore)
+    calibratedEmployees.forEach((emp, idx) => {
+      emp.originalRank = idx + 1
+    })
+
+    const levelDistribution: Record<string, number> = {}
+    for (const level of performanceLevels.value) {
+      levelDistribution[level.id] = 0
+    }
+    for (const emp of calibratedEmployees) {
+      if (levelDistribution[emp.currentLevelId] !== undefined) {
+        levelDistribution[emp.currentLevelId]++
+      }
+    }
+
+    currentCalibration.value = {
+      id: generateId(),
+      year: calibrationYear.value,
+      half: calibrationHalf.value,
+      scope: calibrationScope.value,
+      scopeId,
+      scopeName,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      appliedAt: null,
+      status: 'draft',
+      totalEmployees: calibratedEmployees.length,
+      levelDistribution,
+      employees: calibratedEmployees
+    }
+
+    executeCalibration()
+  }
+
+  function executeCalibration() {
+    if (!currentCalibration.value) return
+
+    const employees = [...currentCalibration.value.employees]
+    const totalCount = employees.length
+
+    employees.sort((a, b) => b.sortScore - a.sortScore)
+
+    const levelMaxCounts: { levelId: string; levelName: string; maxCount: number; coefficient: number }[] = []
+    for (const ratio of performanceDistributionRatios.value) {
+      const level = performanceLevels.value.find((l) => l.id === ratio.levelId)
+      if (level) {
+        levelMaxCounts.push({
+          levelId: level.id,
+          levelName: level.name,
+          maxCount: Math.floor(totalCount * ratio.maxRatio),
+          coefficient: level.coefficient
+        })
+      }
+    }
+
+    levelMaxCounts.sort((a, b) => b.coefficient - a.coefficient)
+
+    let assignedCount = 0
+    for (const levelInfo of levelMaxCounts) {
+      const endIdx = Math.min(assignedCount + levelInfo.maxCount, totalCount)
+      for (let i = assignedCount; i < endIdx; i++) {
+        const emp = employees[i]
+        emp.calibratedLevelId = levelInfo.levelId
+        emp.calibratedLevelName = levelInfo.levelName
+        emp.calibratedCoefficient = levelInfo.coefficient
+        emp.calibratedRank = i + 1
+        emp.changed = emp.currentLevelId !== levelInfo.levelId
+      }
+      assignedCount = endIdx
+    }
+
+    if (assignedCount < totalCount) {
+      const lastLevel = levelMaxCounts[levelMaxCounts.length - 1]
+      for (let i = assignedCount; i < totalCount; i++) {
+        const emp = employees[i]
+        emp.calibratedLevelId = lastLevel.levelId
+        emp.calibratedLevelName = lastLevel.levelName
+        emp.calibratedCoefficient = lastLevel.coefficient
+        emp.calibratedRank = i + 1
+        emp.changed = emp.currentLevelId !== lastLevel.levelId
+      }
+    }
+
+    const levelDistribution: Record<string, number> = {}
+    for (const level of performanceLevels.value) {
+      levelDistribution[level.id] = 0
+    }
+    for (const emp of employees) {
+      if (emp.calibratedLevelId && levelDistribution[emp.calibratedLevelId] !== undefined) {
+        levelDistribution[emp.calibratedLevelId]++
+      }
+    }
+
+    currentCalibration.value.employees = employees
+    currentCalibration.value.levelDistribution = levelDistribution
+  }
+
+  function adjustEmployeeLevel(employeeId: string, newLevelId: string) {
+    if (!currentCalibration.value) return
+
+    const emp = currentCalibration.value.employees.find((e) => e.employeeId === employeeId)
+    if (!emp) return
+
+    const newLevel = performanceLevels.value.find((l) => l.id === newLevelId)
+    if (!newLevel) return
+
+    emp.calibratedLevelId = newLevel.id
+    emp.calibratedLevelName = newLevel.name
+    emp.calibratedCoefficient = newLevel.coefficient
+    emp.changed = emp.currentLevelId !== newLevel.id
+
+    const levelDistribution: Record<string, number> = {}
+    for (const level of performanceLevels.value) {
+      levelDistribution[level.id] = 0
+    }
+    for (const e of currentCalibration.value.employees) {
+      if (e.calibratedLevelId && levelDistribution[e.calibratedLevelId] !== undefined) {
+        levelDistribution[e.calibratedLevelId]++
+      }
+    }
+    currentCalibration.value.levelDistribution = levelDistribution
+  }
+
+  function confirmCalibration() {
+    if (!currentCalibration.value) return
+    currentCalibration.value.status = 'confirmed'
+  }
+
+  function applyCalibration() {
+    if (!currentCalibration.value || currentCalibration.value.status === 'draft') return
+
+    for (const emp of currentCalibration.value.employees) {
+      if (emp.calibratedLevelId) {
+        updateEmployee(emp.employeeId, { performanceLevelId: emp.calibratedLevelId })
+      }
+    }
+
+    currentCalibration.value.status = 'applied'
+    currentCalibration.value.appliedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+    calibrationResults.value.push({ ...currentCalibration.value })
+  }
+
+  function saveCalibration() {
+    if (!currentCalibration.value) return
+    const existingIdx = calibrationResults.value.findIndex((c) => c.id === currentCalibration.value!.id)
+    if (existingIdx !== -1) {
+      calibrationResults.value[existingIdx] = { ...currentCalibration.value }
+    } else {
+      calibrationResults.value.push({ ...currentCalibration.value })
+    }
+  }
+
+  function getCalibrationDistributionStats() {
+    if (!currentCalibration.value) return []
+
+    return performanceDistributionRatios.value.map((ratio) => {
+      const level = performanceLevels.value.find((l) => l.id === ratio.levelId)
+      const count = currentCalibration.value!.levelDistribution[ratio.levelId] || 0
+      const total = currentCalibration.value!.totalEmployees
+      const actualRatio = total > 0 ? count / total : 0
+      const overLimit = actualRatio > ratio.maxRatio
+      return {
+        levelId: ratio.levelId,
+        levelName: ratio.levelName,
+        maxRatio: ratio.maxRatio,
+        actualCount: count,
+        actualRatio,
+        overLimit,
+        coefficient: level?.coefficient || 0
+      }
+    })
+  }
+
   function exportData(): AppData {
     return {
       performanceLevels: performanceLevels.value,
       employeeTags: employeeTags.value,
       departments: departments.value,
       bonusPool: bonusPool.value,
-      comprehensiveIncome: comprehensiveIncome.value
+      comprehensiveIncome: comprehensiveIncome.value,
+      performanceDistributionRatios: performanceDistributionRatios.value,
+      calibrationResults: calibrationResults.value
     }
   }
 
@@ -657,6 +919,13 @@ export const useBonusStore = defineStore('bonus', () => {
       }))
       bonusPool.value = data.bonusPool
       comprehensiveIncome.value = data.comprehensiveIncome || {}
+      if (data.performanceDistributionRatios && data.performanceDistributionRatios.length > 0) {
+        performanceDistributionRatios.value = data.performanceDistributionRatios
+      } else {
+        initDistributionRatios()
+      }
+      calibrationResults.value = data.calibrationResults || []
+      currentCalibration.value = null
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
       return true
     } catch {
@@ -680,6 +949,13 @@ export const useBonusStore = defineStore('bonus', () => {
     totalTaxComprehensive,
     salaryAdjustmentImpacts,
     bonusCalculationYear,
+    performanceDistributionRatios,
+    calibrationResults,
+    currentCalibration,
+    calibrationYear,
+    calibrationHalf,
+    calibrationScope,
+    calibrationDeptId,
     addPerformanceLevel,
     updatePerformanceLevel,
     removePerformanceLevel,
@@ -702,6 +978,15 @@ export const useBonusStore = defineStore('bonus', () => {
     addSalaryAdjustmentImpact,
     removeEmployeeImpacts,
     calculateEmployeeBaseAmount,
+    updateDistributionRatio,
+    initDistributionRatios,
+    startCalibration,
+    executeCalibration,
+    adjustEmployeeLevel,
+    confirmCalibration,
+    applyCalibration,
+    saveCalibration,
+    getCalibrationDistributionStats,
     exportData,
     importData
   }

@@ -64,6 +64,10 @@
               <PerformanceCoefficientTable />
             </template>
 
+            <template v-else-if="activeMenu === 'calibration'">
+              <PerformanceCalibration />
+            </template>
+
             <template v-else-if="activeMenu === 'tags'">
               <EmployeeTagConfig />
             </template>
@@ -149,11 +153,13 @@ import {
   ClusterOutlined,
   PieChartOutlined,
   HistoryOutlined,
-  ProfileOutlined
+  ProfileOutlined,
+  BarChartOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import PerformanceCoefficientTable from '@/components/PerformanceCoefficientTable.vue'
+import PerformanceCalibration from '@/components/PerformanceCalibration.vue'
 import BonusPoolConfig from '@/components/BonusPoolConfig.vue'
 import EmployeeDetail from '@/components/EmployeeDetail.vue'
 import OverviewDashboard from '@/components/OverviewDashboard.vue'
@@ -186,6 +192,11 @@ const menuOptions: MenuOption[] = [
     label: '绩效系数配置',
     key: 'performance',
     icon: () => h(StarOutlined)
+  },
+  {
+    label: '绩效分布校准',
+    key: 'calibration',
+    icon: () => h(BarChartOutlined)
   },
   {
     label: '员工标签管理',
@@ -250,6 +261,7 @@ const currentTitle = computed(() => {
   const map: Record<string, string> = {
     overview: '📊 总览面板',
     performance: '⭐ 绩效系数配置',
+    calibration: '📈 绩效分布校准',
     tags: '🏷️ 员工标签管理',
     pool: '💰 奖金池与分配配置',
     calculate: '🧮 个人年终奖测算',

@@ -5,6 +5,48 @@ export interface PerformanceLevel {
   description?: string
 }
 
+export interface PerformanceDistributionRatio {
+  levelId: string
+  levelName: string
+  maxRatio: number
+}
+
+export type CalibrationScope = 'company' | 'department'
+
+export interface CalibrationEmployee {
+  employeeId: string
+  employeeName: string
+  departmentId: string
+  departmentName: string
+  position: string
+  baseSalary: number
+  currentLevelId: string
+  currentLevelName: string
+  currentCoefficient: number
+  calibratedLevelId: string | null
+  calibratedLevelName: string | null
+  calibratedCoefficient: number | null
+  sortScore: number
+  originalRank: number
+  calibratedRank: number | null
+  changed: boolean
+}
+
+export interface CalibrationResult {
+  id: string
+  year: number
+  half: 'first' | 'second' | 'annual'
+  scope: CalibrationScope
+  scopeId: string
+  scopeName: string
+  createdAt: string
+  appliedAt: string | null
+  status: 'draft' | 'confirmed' | 'applied'
+  totalEmployees: number
+  levelDistribution: Record<string, number>
+  employees: CalibrationEmployee[]
+}
+
 export interface Department {
   id: string
   name: string
@@ -106,6 +148,8 @@ export interface AppData {
   departments: Department[]
   bonusPool: BonusPoolConfig
   comprehensiveIncome: Record<string, ComprehensiveIncomeInfo>
+  performanceDistributionRatios: PerformanceDistributionRatio[]
+  calibrationResults: CalibrationResult[]
 }
 
 export type AdjustmentReasonCategory =
