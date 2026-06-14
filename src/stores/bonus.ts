@@ -15,7 +15,8 @@ import type {
   PerformanceDistributionRatio,
   CalibrationResult,
   CalibrationEmployee,
-  CalibrationScope
+  CalibrationScope,
+  EmployeeTagExpiryWarning
 } from '@/types'
 import {
   generateId,
@@ -65,11 +66,11 @@ export const useBonusStore = defineStore('bonus', () => {
   initDistributionRatios()
 
   const employeeTags = ref<EmployeeTag[]>([
-    { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d' },
-    { id: generateId(), name: '关键岗位', coefficient: 0.2, description: '担任关键岗位的员工', color: '#fa8c16' },
-    { id: generateId(), name: '新人', coefficient: 0.05, description: '入职不满一年的新员工', color: '#52c41a' },
-    { id: generateId(), name: '管理干部', coefficient: 0.15, description: '承担管理职责的员工', color: '#1890ff' },
-    { id: generateId(), name: '技术骨干', coefficient: 0.25, description: '技术领域深度贡献者', color: '#722ed1' }
+    { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d', effectiveDate: '2025-01-01', expiryDate: '2026-12-31' },
+    { id: generateId(), name: '关键岗位', coefficient: 0.2, description: '担任关键岗位的员工', color: '#fa8c16', effectiveDate: '2025-01-01', expiryDate: dayjs().add(5, 'day').format('YYYY-MM-DD') },
+    { id: generateId(), name: '新人', coefficient: 0.05, description: '入职不满一年的新员工', color: '#52c41a', effectiveDate: '2025-01-01', expiryDate: '2026-06-20' },
+    { id: generateId(), name: '管理干部', coefficient: 0.15, description: '承担管理职责的员工', color: '#1890ff', effectiveDate: '2025-01-01', expiryDate: '2027-06-30' },
+    { id: generateId(), name: '技术骨干', coefficient: 0.25, description: '技术领域深度贡献者', color: '#722ed1', effectiveDate: dayjs().add(10, 'day').format('YYYY-MM-DD'), expiryDate: '2027-12-31' }
   ])
 
   const dept1Id = generateId()
@@ -248,12 +249,88 @@ export const useBonusStore = defineStore('bonus', () => {
     }
   }
 
-  function getTagCoefficient(tagIds: string[]): number {
+  function isTagActive(tag: EmployeeTag, checkDate: dayjs.Dayjs = dayjs()): boolean {
+    const effective = dayjs(tag.effectiveDate)
+    const expiry = dayjs(tag.expiryDate)
+    return !checkDate.isBefore(effective, 'day') && !checkDate.isAfter(expiry, 'day')
+  }
+
+  function getTagCoefficient(tagIds: string[], checkDate: dayjs.Dayjs = dayjs()): number {
     return tagIds.reduce((sum, tid) => {
       const tag = employeeTags.value.find((t) => t.id === tid)
-      return sum + (tag?.coefficient ?? 0)
+      if (tag && isTagActive(tag, checkDate)) {
+        return sum + tag.coefficient
+      }
+      return sum
     }, 0)
   }
+
+  function getExpiringTagWarnings(daysThreshold: number = 7): EmployeeTagExpiryWarning[] {
+    const now = dayjs()
+    const warnings: EmployeeTagExpiryWarning[] = []
+
+    for (const tag of employeeTags.value) {
+      if (!isTagActive(tag, now)) continue
+
+      const expiry = dayjs(tag.expiryDate)
+      const daysUntilExpiry = expiry.diff(now, 'day') + 1
+
+      if (daysUntilExpiry > 0 && daysUntilExpiry <= daysThreshold) {
+        const affectedEmployees: EmployeeTagExpiryWarning['affectedEmployees'] = []
+        let totalPotentialLoss = 0
+
+        for (const dept of departments.value) {
+          for (const emp of dept.employees) {
+            if (emp.tagIds.includes(tag.id)) {
+              const weightedSalary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+              const base = weightedSalary * bonusPool.value.baseRatio
+              const currentTagBonus = round2(base * tag.coefficient)
+
+              const deptBaseTotals: Record<string, number> = {}
+              for (const d of departments.value) {
+                let total = 0
+                for (const e of d.employees) {
+                  total += calculateEmployeeBaseAmount(e)
+                }
+                deptBaseTotals[d.id] = total
+              }
+              const deptAlloc = departmentAllocations.value[dept.id] || 0
+              const deptBaseTotal = deptBaseTotals[dept.id] || 1
+              const scaleFactor = deptAlloc / deptBaseTotal
+
+              const potentialLoss = round2(currentTagBonus * scaleFactor)
+              totalPotentialLoss += potentialLoss
+
+              affectedEmployees.push({
+                id: emp.id,
+                name: emp.name,
+                departmentName: dept.name,
+                currentTagBonus: round2(currentTagBonus * scaleFactor),
+                potentialLoss
+              })
+            }
+          }
+        }
+
+        if (affectedEmployees.length > 0) {
+          warnings.push({
+            tag,
+            daysUntilExpiry,
+            affectedEmployees,
+            totalPotentialLoss,
+            affectedCount: affectedEmployees.length
+          })
+        }
+      }
+    }
+
+    return warnings.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry)
+  }
+
+  const activeEmployeeTags = computed(() => {
+    const now = dayjs()
+    return employeeTags.value.filter(tag => isTagActive(tag, now))
+  })
 
   function addDepartment(dept: Omit<Department, 'id' | 'employees'>) {
     const newId = generateId()
@@ -971,6 +1048,7 @@ export const useBonusStore = defineStore('bonus', () => {
   return {
     performanceLevels,
     employeeTags,
+    activeEmployeeTags,
     departments,
     bonusPool,
     comprehensiveIncome,
@@ -997,7 +1075,9 @@ export const useBonusStore = defineStore('bonus', () => {
     addEmployeeTag,
     updateEmployeeTag,
     removeEmployeeTag,
+    isTagActive,
     getTagCoefficient,
+    getExpiringTagWarnings,
     addDepartment,
     updateDepartment,
     removeDepartment,

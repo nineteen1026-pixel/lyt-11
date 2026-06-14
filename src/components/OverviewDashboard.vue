@@ -1,5 +1,6 @@
 <template>
   <n-space vertical :size="20" style="width: 100%">
+    <TagExpiryWarning />
     <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen">
       <n-gi>
         <n-card :bordered="false" hoverable>
@@ -118,6 +119,7 @@ import {
 } from '@vicons/antd'
 import type { PersonalCalculationResult, TaxMethod } from '@/types'
 import { formatCurrency } from '@/utils/tax'
+import TagExpiryWarning from '@/components/TagExpiryWarning.vue'
 
 const store = useBonusStore()
 

@@ -60,6 +60,8 @@ export interface EmployeeTag {
   coefficient: number
   description?: string
   color?: string
+  effectiveDate: string
+  expiryDate: string
 }
 
 export interface Employee {
@@ -353,6 +355,20 @@ export interface ArchiveTimelineEvent {
   tags?: string[]
   detail?: any
   relatedRecordId?: string
+}
+
+export interface EmployeeTagExpiryWarning {
+  tag: EmployeeTag
+  daysUntilExpiry: number
+  affectedEmployees: {
+    id: string
+    name: string
+    departmentName: string
+    currentTagBonus: number
+    potentialLoss: number
+  }[]
+  totalPotentialLoss: number
+  affectedCount: number
 }
 
 export interface EmployeeCompensationArchive {

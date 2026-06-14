@@ -32,6 +32,24 @@
             {{ formData.coefficient > 0 ? `额外增加 ${(formData.coefficient * 100).toFixed(0)}%` : '无加成' }}
           </n-text>
         </n-form-item>
+        <n-form-item label="生效日期" required>
+          <n-date-picker
+            v-model:value="formData.effectiveDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+            placeholder="选择生效日期"
+          />
+        </n-form-item>
+        <n-form-item label="失效日期" required>
+          <n-date-picker
+            v-model:value="formData.expiryDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+            placeholder="选择失效日期"
+          />
+        </n-form-item>
         <n-form-item label="标签描述">
           <n-input v-model:value="formData.description" placeholder="标签适用说明" type="textarea" :rows="2" />
         </n-form-item>
@@ -58,6 +76,7 @@ import { useMessage, useDialog } from 'naive-ui'
 import { PlusOutlined as AddOutlined, EditOutlined, DeleteOutlined } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { formatCurrency, round2 } from '@/utils/tax'
+import dayjs from 'dayjs'
 
 const store = useBonusStore()
 const message = useMessage()
@@ -76,10 +95,23 @@ const defaultFormData = () => ({
   name: '',
   coefficient: 0.1,
   description: '',
-  color: '#1890ff'
+  color: '#1890ff',
+  effectiveDate: dayjs().format('YYYY-MM-DD'),
+  expiryDate: dayjs().add(1, 'year').format('YYYY-MM-DD')
 })
 
 const formData = ref(defaultFormData())
+
+function getTagStatus(tag: any) {
+  const now = dayjs()
+  const effective = dayjs(tag.effectiveDate)
+  const expiry = dayjs(tag.expiryDate)
+  if (now.isBefore(effective, 'day')) return { label: '未生效', type: 'default' as const }
+  if (now.isAfter(expiry, 'day')) return { label: '已失效', type: 'error' as const }
+  const daysUntilExpiry = expiry.diff(now, 'day') + 1
+  if (daysUntilExpiry <= 7) return { label: `即将失效(${daysUntilExpiry}天)`, type: 'warning' as const }
+  return { label: '生效中', type: 'success' as const }
+}
 
 function openAddModal() {
   editingId.value = null
@@ -93,7 +125,9 @@ function openEditModal(row: any) {
     name: row.name,
     coefficient: row.coefficient,
     description: row.description || '',
-    color: row.color || '#1890ff'
+    color: row.color || '#1890ff',
+    effectiveDate: row.effectiveDate || dayjs().format('YYYY-MM-DD'),
+    expiryDate: row.expiryDate || dayjs().add(1, 'year').format('YYYY-MM-DD')
   }
   showAddModal.value = true
 }
@@ -107,11 +141,37 @@ const columns = [
       h('n-tag', { color: { color: row.color || '#1890ff', textColor: '#fff' }, round: true }, { default: () => row.name })
   },
   {
+    title: '状态',
+    key: 'status',
+    width: 130,
+    render: (row: any) => {
+      const status = getTagStatus(row)
+      return h('n-tag', { size: 'small', type: status.type }, { default: () => status.label })
+    }
+  },
+  {
+    title: '生效日期',
+    key: 'effectiveDate',
+    width: 120,
+    render: (row: any) => row.effectiveDate || '-'
+  },
+  {
+    title: '失效日期',
+    key: 'expiryDate',
+    width: 120,
+    render: (row: any) => row.expiryDate || '-'
+  },
+  {
     title: '加成系数',
     key: 'coefficient',
     width: 140,
-    render: (row: any) =>
-      h('n-text', { strong: true, type: 'success' }, { default: () => `+${(row.coefficient * 100).toFixed(0)}%` })
+    render: (row: any) => {
+      const status = getTagStatus(row)
+      const isActive = status.type === 'success' || status.type === 'warning'
+      return h('n-text', { strong: true, type: isActive ? 'success' : 'default' }, {
+        default: () => isActive ? `+${(row.coefficient * 100).toFixed(0)}%` : '0%'
+      })
+    }
   },
   {
     title: '描述',
@@ -133,8 +193,10 @@ const columns = [
     width: 160,
     render: (row: any) => {
       const base = 10000 * store.bonusPool.baseRatio
-      const tagBonus = round2(base * row.coefficient)
-      return h('n-text', { type: 'warning' }, { default: () => formatCurrency(tagBonus) })
+      const status = getTagStatus(row)
+      const isActive = status.type === 'success' || status.type === 'warning'
+      const tagBonus = isActive ? round2(base * row.coefficient) : 0
+      return h('n-text', { type: tagBonus > 0 ? 'warning' : 'default' }, { default: () => formatCurrency(tagBonus) })
     }
   },
   {
@@ -187,6 +249,14 @@ function handleSave() {
   }
   if (formData.value.coefficient < 0) {
     message.error('加成系数不能为负数')
+    return false
+  }
+  if (!formData.value.effectiveDate || !formData.value.expiryDate) {
+    message.error('请选择生效日期和失效日期')
+    return false
+  }
+  if (dayjs(formData.value.expiryDate).isBefore(formData.value.effectiveDate, 'day')) {
+    message.error('失效日期不能早于生效日期')
     return false
   }
   if (editingId.value) {

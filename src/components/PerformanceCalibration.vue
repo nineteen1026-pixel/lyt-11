@@ -1,5 +1,6 @@
 <template>
   <n-space vertical :size="20" style="width: 100%">
+    <TagExpiryWarning />
     <n-card title="绩效分布强制校准" :bordered="false">
       <template #header-extra>
         <n-space>
@@ -148,6 +149,7 @@ import {
 import { useBonusStore } from '@/stores/bonus'
 import { formatCurrency } from '@/utils/tax'
 import type { SelectOption, DataTableColumns } from 'naive-ui'
+import TagExpiryWarning from '@/components/TagExpiryWarning.vue'
 
 const store = useBonusStore()
 const message = useMessage()
