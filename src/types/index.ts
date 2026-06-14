@@ -47,6 +47,21 @@ export type TaxMethod = 'oneTime' | 'comprehensive'
 
 export type AdjustmentType = 'none' | 'capped' | 'floored'
 
+export type BonusImpactSourceType = 'salary_adjustment'
+
+export interface BonusImpactSource {
+  id: string
+  type: BonusImpactSourceType
+  name: string
+  description: string
+  effectiveDate: string
+  oldValue: number
+  newValue: number
+  impactAmount: number
+  requestNo?: string
+  reasonName?: string
+}
+
 export interface PersonalCalculationResult {
   employeeId: string
   employeeName: string
@@ -66,6 +81,9 @@ export interface PersonalCalculationResult {
   netBonusComprehensive: number
   betterMethod: TaxMethod
   savedTax: number
+  impactSources: BonusImpactSource[]
+  weightedBaseSalary: number
+  originalBaseAmount: number
 }
 
 export interface ComprehensiveIncomeInfo {

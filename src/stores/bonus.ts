@@ -10,7 +10,8 @@ import type {
   ComprehensiveIncomeInfo,
   TaxMethod,
   AppData,
-  AdjustmentType
+  AdjustmentType,
+  BonusImpactSource
 } from '@/types'
 import {
   generateId,
@@ -18,6 +19,7 @@ import {
   calculateComprehensiveTax,
   round2
 } from '@/utils/tax'
+import dayjs from 'dayjs'
 
 export const useBonusStore = defineStore('bonus', () => {
   const performanceLevels = ref<PerformanceLevel[]>([
@@ -156,6 +158,10 @@ export const useBonusStore = defineStore('bonus', () => {
     floorEnabled: false,
     floorAmount: 10000
   })
+
+  const salaryAdjustmentImpacts = ref<BonusImpactSource[]>([])
+
+  const bonusCalculationYear = ref(dayjs().year())
 
   const comprehensiveIncome = ref<Record<string, ComprehensiveIncomeInfo>>({})
 
@@ -329,6 +335,79 @@ export const useBonusStore = defineStore('bonus', () => {
     return undefined
   }
 
+  function getEmployeeImpacts(employeeId: string): BonusImpactSource[] {
+    return salaryAdjustmentImpacts.value.filter((i) => i.id.startsWith(employeeId + '_'))
+  }
+
+  function calculateWeightedBaseSalary(employee: Employee, year: number): number {
+    const impacts = getEmployeeImpacts(employee.id).filter((i) => {
+      const impactYear = dayjs(i.effectiveDate).year()
+      return impactYear === year
+    })
+
+    if (impacts.length === 0) {
+      return employee.baseSalary
+    }
+
+    const sortedImpacts = [...impacts].sort((a, b) =>
+      dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
+    )
+
+    let totalWeightedSalary = 0
+    let currentSalary = employee.baseSalary
+    let periodStart = dayjs(`${year}-01-01`)
+    const yearEnd = dayjs(`${year}-12-31`)
+
+    for (const impact of sortedImpacts) {
+      const impactDate = dayjs(impact.effectiveDate)
+      if (impactDate.isBefore(periodStart)) {
+        currentSalary = impact.newValue
+        continue
+      }
+      if (impactDate.isAfter(yearEnd)) break
+
+      const daysInPeriod = impactDate.startOf('month').diff(periodStart, 'day')
+      if (daysInPeriod > 0) {
+        totalWeightedSalary += currentSalary * daysInPeriod
+      }
+      periodStart = impactDate.startOf('month')
+      currentSalary = impact.newValue
+    }
+
+    const remainingDays = yearEnd.endOf('month').diff(periodStart, 'day') + 1
+    if (remainingDays > 0) {
+      totalWeightedSalary += currentSalary * remainingDays
+    }
+
+    const totalDays = yearEnd.endOf('month').diff(dayjs(`${year}-01-01`), 'day') + 1
+    return round2(totalWeightedSalary / totalDays)
+  }
+
+  function addSalaryAdjustmentImpact(
+    employeeId: string,
+    impact: Omit<BonusImpactSource, 'id' | 'type' | 'impactAmount'>
+  ) {
+    const emp = getEmployeeById(employeeId)
+    if (!emp) return
+
+    const oldBase = emp.baseSalary * bonusPool.value.baseRatio
+    const newBase = impact.newValue * bonusPool.value.baseRatio
+    const impactAmount = round2(newBase - oldBase)
+
+    salaryAdjustmentImpacts.value.push({
+      ...impact,
+      id: `${employeeId}_${generateId()}`,
+      type: 'salary_adjustment',
+      impactAmount
+    })
+  }
+
+  function removeEmployeeImpacts(employeeId: string) {
+    salaryAdjustmentImpacts.value = salaryAdjustmentImpacts.value.filter(
+      (i) => !i.id.startsWith(employeeId + '_')
+    )
+  }
+
   const departmentAllocations = computed(() => {
     const map: Record<string, number> = {}
     for (const dept of departments.value) {
@@ -339,8 +418,11 @@ export const useBonusStore = defineStore('bonus', () => {
     return map
   })
 
-  function calculateEmployeeBaseAmount(employee: Employee): number {
-    const base = employee.baseSalary * bonusPool.value.baseRatio
+  function calculateEmployeeBaseAmount(employee: Employee, useWeighted: boolean = true): number {
+    const salary = useWeighted
+      ? calculateWeightedBaseSalary(employee, bonusCalculationYear.value)
+      : employee.baseSalary
+    const base = salary * bonusPool.value.baseRatio
     const performance = base * getPerformanceCoefficient(employee.performanceLevelId) * bonusPool.value.performanceRatio
     const tenure = base * Math.min(employee.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
     const tagBonus = base * getTagCoefficient(employee.tagIds)
@@ -353,11 +435,14 @@ export const useBonusStore = defineStore('bonus', () => {
       employeeName: string
       departmentName: string
       baseAmount: number
+      originalBaseAmount: number
+      weightedBaseSalary: number
       performanceBonus: number
       tenureBonus: number
       tagBonus: number
       departmentAllocation: number
       grossBonus: number
+      impactSources: BonusImpactSource[]
     }
     const rawResults: RawCalc[] = []
     const deptBaseTotals: Record<string, number> = {}
@@ -375,7 +460,9 @@ export const useBonusStore = defineStore('bonus', () => {
       const deptBaseTotal = deptBaseTotals[dept.id] || 1
 
       for (const emp of dept.employees) {
-        const base = emp.baseSalary * bonusPool.value.baseRatio
+        const weightedSalary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+        const base = weightedSalary * bonusPool.value.baseRatio
+        const originalBase = emp.baseSalary * bonusPool.value.baseRatio
         const performanceBonus = round2(
           base * getPerformanceCoefficient(emp.performanceLevelId) * bonusPool.value.performanceRatio
         )
@@ -386,16 +473,26 @@ export const useBonusStore = defineStore('bonus', () => {
         const baseAmount = round2(base + performanceBonus + tenureBonus + tagBonus)
         const scaleFactor = deptAlloc / deptBaseTotal
         const grossBonus = round2(baseAmount * scaleFactor)
+        const impacts = getEmployeeImpacts(emp.id)
+
+        const scaledImpacts = impacts.map((imp) => ({
+          ...imp,
+          impactAmount: round2(imp.impactAmount * scaleFactor)
+        }))
+
         rawResults.push({
           employeeId: emp.id,
           employeeName: emp.name,
           departmentName: dept.name,
           baseAmount: round2(base),
+          originalBaseAmount: round2(originalBase),
+          weightedBaseSalary: weightedSalary,
           performanceBonus,
           tenureBonus,
           tagBonus,
           departmentAllocation: round2(baseAmount * (scaleFactor - 1)),
-          grossBonus
+          grossBonus,
+          impactSources: scaledImpacts
         })
       }
     }
@@ -486,6 +583,8 @@ export const useBonusStore = defineStore('bonus', () => {
         employeeName: r.employeeName,
         departmentName: r.departmentName,
         baseAmount: r.baseAmount,
+        originalBaseAmount: r.originalBaseAmount,
+        weightedBaseSalary: r.weightedBaseSalary,
         performanceBonus: r.performanceBonus,
         tenureBonus: r.tenureBonus,
         tagBonus: r.tagBonus,
@@ -499,7 +598,8 @@ export const useBonusStore = defineStore('bonus', () => {
         taxComprehensive,
         netBonusComprehensive,
         betterMethod,
-        savedTax
+        savedTax,
+        impactSources: r.impactSources
       }
     })
 
@@ -568,6 +668,8 @@ export const useBonusStore = defineStore('bonus', () => {
     totalGrossBonus,
     totalTaxOneTime,
     totalTaxComprehensive,
+    salaryAdjustmentImpacts,
+    bonusCalculationYear,
     addPerformanceLevel,
     updatePerformanceLevel,
     removePerformanceLevel,
@@ -585,6 +687,11 @@ export const useBonusStore = defineStore('bonus', () => {
     getPerformanceCoefficient,
     getDepartmentById,
     getEmployeeById,
+    getEmployeeImpacts,
+    calculateWeightedBaseSalary,
+    addSalaryAdjustmentImpact,
+    removeEmployeeImpacts,
+    calculateEmployeeBaseAmount,
     exportData,
     importData
   }

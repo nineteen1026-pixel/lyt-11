@@ -25,9 +25,51 @@
           <n-descriptions-item label="部门 / 姓名">
             {{ result.departmentName }} · {{ result.employeeName }}
           </n-descriptions-item>
+          <n-descriptions-item label="月基本工资">
+            <n-text type="info">{{ formatCurrency(result.weightedBaseSalary) }}</n-text>
+            <n-text depth="3" style="margin-left: 8px" v-if="hasSalaryAdjustment">
+              （加权平均，含调薪影响）
+            </n-text>
+          </n-descriptions-item>
+          <n-descriptions-item
+            v-if="hasSalaryAdjustment"
+            label="调薪影响"
+            label-style="background: #fff1f0"
+          >
+            <n-space vertical :size="8" style="width: 100%">
+              <div
+                v-for="imp in result.impactSources"
+                :key="imp.id"
+                style="padding: 8px 12px; background: #fafafa; border-radius: 4px"
+              >
+                <n-text strong>{{ imp.name }}</n-text>
+                <n-text depth="3" style="margin-left: 8px; font-size: 12px">
+                  {{ imp.description }}
+                </n-text>
+                <div style="margin-top: 4px; font-size: 12px">
+                  <n-text depth="3">生效日期：{{ imp.effectiveDate }}</n-text>
+                </div>
+                <div style="margin-top: 2px; font-size: 12px">
+                  <n-text depth="3">薪资：{{ formatCurrency(imp.oldValue) }} → {{ formatCurrency(imp.newValue) }}</n-text>
+                </div>
+                <div style="margin-top: 4px">
+                  <n-tag size="small" :type="imp.impactAmount >= 0 ? 'success' : 'warning'">
+                    年终奖影响：{{ imp.impactAmount >= 0 ? '+' : '' }}{{ formatCurrency(imp.impactAmount) }}
+                  </n-tag>
+                </div>
+              </div>
+            </n-space>
+          </n-descriptions-item>
           <n-descriptions-item label="基础金额">
             <n-text type="info">{{ formatCurrency(result.baseAmount) }}</n-text>
             <n-text depth="3" style="margin-left: 8px">月薪 × 倍数</n-text>
+            <n-text
+              depth="3"
+              style="margin-left: 8px"
+              v-if="Math.abs(result.baseAmount - result.originalBaseAmount) > 0.01"
+            >
+              （原始 {{ formatCurrency(result.originalBaseAmount) }}）
+            </n-text>
           </n-descriptions-item>
           <n-descriptions-item label="绩效加成">
             <n-text type="success">{{ formatCurrency(result.performanceBonus) }}</n-text>
@@ -129,5 +171,9 @@ const betterMethodText = computed(() =>
 const betterTagType = computed(() => {
   if (props.result.savedTax > 0) return 'success'
   return 'info'
+})
+
+const hasSalaryAdjustment = computed(() => {
+  return props.result.impactSources && props.result.impactSources.length > 0
 })
 </script>

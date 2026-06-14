@@ -11,6 +11,16 @@
           <template #prefix><SearchOutlined /></template>
         </n-input>
         <n-select
+          v-model:value="filterImpact"
+          placeholder="调薪影响"
+          style="width: 160px"
+          :options="[
+            { label: '全部员工', value: 'all' },
+            { label: '有调薪影响', value: 'has_impact' },
+            { label: '无调薪影响', value: 'no_impact' }
+          ]"
+        />
+        <n-select
           v-model:value="filterMethod"
           placeholder="计税方案"
           style="width: 180px"
@@ -70,10 +80,11 @@
 import { ref, computed, h } from 'vue'
 import type { DataTableColumns } from 'naive-ui'
 import { useMessage } from 'naive-ui'
-import { SearchOutlined, CopyOutlined } from '@vicons/antd'
+import { SearchOutlined, CopyOutlined, RiseOutlined } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import type { PersonalCalculationResult, TaxMethod } from '@/types'
 import { formatCurrency } from '@/utils/tax'
+import dayjs from 'dayjs'
 
 const store = useBonusStore()
 const message = useMessage()
@@ -81,6 +92,7 @@ const message = useMessage()
 const loading = ref(false)
 const keyword = ref('')
 const filterMethod = ref<TaxMethod | ''>('')
+const filterImpact = ref<'all' | 'has_impact' | 'no_impact'>('all')
 const sortKey = ref('grossBonusDesc')
 
 const columns: DataTableColumns<PersonalCalculationResult> = [
@@ -88,7 +100,7 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
   {
     title: '姓名',
     key: 'employeeName',
-    width: 160,
+    width: 200,
     fixed: 'left',
     render: (row) =>
       h(
@@ -131,6 +143,69 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
                 )
               )
             }
+            if (row.impactSources && row.impactSources.length > 0) {
+              const totalImpact = row.impactSources.reduce((s, i) => s + i.impactAmount, 0)
+              children.push(
+                h(
+                  'n-tooltip',
+                  { trigger: 'hover' },
+                  {
+                    default: () =>
+                      h(
+                        'n-tag',
+                        { size: 'small', type: 'error', round: true },
+                        {
+                          default: () =>
+                            h(
+                              'n-space',
+                              { size: 4, align: 'center' },
+                              {
+                                default: () => [
+                                  h(RiseOutlined, { style: 'font-size: 12px' }),
+                                  `调薪影响${totalImpact >= 0 ? '+' : ''}${formatCurrency(totalImpact)}`
+                                ]
+                              }
+                            )
+                        }
+                      ),
+                    trigger: () =>
+                      h(
+                        'div',
+                        { style: 'max-width: 320px' },
+                        row.impactSources.map((imp) =>
+                          h(
+                            'div',
+                            { style: 'margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1)' },
+                            [
+                              h('div', { style: 'font-weight: bold; margin-bottom: 4px' }, imp.name),
+                              h('div', { style: 'font-size: 12px; opacity: 0.8' }, imp.description),
+                              h('div', { style: 'font-size: 12px; opacity: 0.8; margin-top: 4px' }, [
+                                '生效日期：',
+                                dayjs(imp.effectiveDate).format('YYYY-MM-DD')
+                              ]),
+                              h('div', { style: 'font-size: 12px; opacity: 0.8' }, [
+                                '薪资变动：',
+                                formatCurrency(imp.oldValue),
+                                ' → ',
+                                formatCurrency(imp.newValue)
+                              ]),
+                              h(
+                                'div',
+                                { style: 'font-size: 12px; margin-top: 4px; color: ' + (imp.impactAmount >= 0 ? '#52c41a' : '#f5222d') },
+                                [
+                                  '年终奖影响：',
+                                  imp.impactAmount >= 0 ? '+' : '',
+                                  formatCurrency(imp.impactAmount)
+                                ]
+                              )
+                            ]
+                          )
+                        )
+                      )
+                  }
+                )
+              )
+            }
             return children
           }
         }
@@ -167,7 +242,49 @@ const columns: DataTableColumns<PersonalCalculationResult> = [
     title: '基础',
     key: 'baseAmount',
     width: 110,
-    render: (row) => formatCurrency(row.baseAmount)
+    render: (row) => {
+      if (Math.abs(row.originalBaseAmount - row.baseAmount) > 0.01) {
+        return h(
+          'n-tooltip',
+          { trigger: 'hover' },
+          {
+            default: () => formatCurrency(row.baseAmount),
+            trigger: () =>
+              h(
+                'div',
+                {},
+                [
+                  h('div', {}, '原始基础：' + formatCurrency(row.originalBaseAmount)),
+                  h('div', {}, '加权基础：' + formatCurrency(row.baseAmount)),
+                  h(
+                    'div',
+                    { style: 'color: ' + (row.baseAmount >= row.originalBaseAmount ? '#52c41a' : '#f5222d') },
+                    '差异：' + (row.baseAmount >= row.originalBaseAmount ? '+' : '') + formatCurrency(row.baseAmount - row.originalBaseAmount)
+                  )
+                ]
+              )
+          }
+        )
+      }
+      return formatCurrency(row.baseAmount)
+    }
+  },
+  {
+    title: '加权月薪',
+    key: 'weightedBaseSalary',
+    width: 120,
+    render: (row) => {
+      const emp = store.getEmployeeById(row.employeeId)
+      const baseSalary = emp?.baseSalary || 0
+      if (Math.abs(row.weightedBaseSalary - baseSalary) > 0.01) {
+        return h(
+          'n-text',
+          { type: row.weightedBaseSalary > baseSalary ? 'success' : 'warning', strong: true },
+          { default: () => formatCurrency(row.weightedBaseSalary) }
+        )
+      }
+      return h('n-text', { depth: 3 }, { default: () => formatCurrency(row.weightedBaseSalary) })
+    }
   },
   {
     title: '绩效加成',
@@ -323,6 +440,12 @@ const filteredData = computed(() => {
 
   if (filterMethod.value) {
     list = list.filter((r) => r.betterMethod === filterMethod.value)
+  }
+
+  if (filterImpact.value === 'has_impact') {
+    list = list.filter((r) => r.impactSources && r.impactSources.length > 0)
+  } else if (filterImpact.value === 'no_impact') {
+    list = list.filter((r) => !r.impactSources || r.impactSources.length === 0)
   }
 
   switch (sortKey.value) {

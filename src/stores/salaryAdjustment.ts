@@ -433,6 +433,15 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     } else {
       const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
       pendingToUsedBudget(req.departmentId, req.adjustmentAmount * 12)
+      bonusStore.addSalaryAdjustmentImpact(req.employeeId, {
+        name: '调薪影响',
+        description: `${req.reasonName} - ${req.requestNo}`,
+        effectiveDate: req.effectiveDate,
+        oldValue: req.currentSalary,
+        newValue: req.proposedSalary,
+        requestNo: req.requestNo,
+        reasonName: req.reasonName
+      })
       bonusStore.updateEmployee(req.employeeId, { baseSalary: req.proposedSalary })
       addSalaryHistoryFromRequest(req, now, approverName)
       requests.value[idx] = {
