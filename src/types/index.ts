@@ -89,3 +89,132 @@ export interface AppData {
   bonusPool: BonusPoolConfig
   comprehensiveIncome: Record<string, ComprehensiveIncomeInfo>
 }
+
+export type AdjustmentReasonCategory =
+  | 'annual'
+  | 'performance'
+  | 'promotion'
+  | 'market'
+  | 'certification'
+  | 'transfer'
+  | 'special'
+
+export interface AdjustmentReason {
+  id: string
+  category: AdjustmentReasonCategory
+  name: string
+  description?: string
+  defaultMinRatio?: number
+  defaultMaxRatio?: number
+  enabled: boolean
+}
+
+export type ApprovalNodeType = 'direct_manager' | 'department_head' | 'hr' | 'finance' | 'ceo' | 'custom'
+
+export interface ApprovalNode {
+  id: string
+  name: string
+  type: ApprovalNodeType
+  order: number
+  approverRole?: string
+  minApprovalAmount?: number
+  maxApprovalAmount?: number
+  required: boolean
+}
+
+export type ApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'returned' | 'withdrawn'
+export type NodeApprovalStatus = 'waiting' | 'approved' | 'rejected' | 'skipped' | 'current'
+
+export interface ApprovalRecord {
+  nodeId: string
+  nodeName: string
+  approverName: string
+  status: NodeApprovalStatus
+  comment?: string
+  operatedAt: string
+}
+
+export interface SalaryAdjustmentRequest {
+  id: string
+  requestNo: string
+  employeeId: string
+  employeeName: string
+  departmentId: string
+  departmentName: string
+  position: string
+  reasonCategory: AdjustmentReasonCategory
+  reasonId: string
+  reasonName: string
+  currentSalary: number
+  proposedSalary: number
+  adjustmentAmount: number
+  adjustmentRatio: number
+  effectiveDate: string
+  description: string
+  attachments: string[]
+  status: ApprovalStatus
+  currentNodeIndex: number
+  approvalRecords: ApprovalRecord[]
+  workflowSnapshot: ApprovalNode[]
+  applicantName: string
+  createdAt: string
+  updatedAt: string
+  approvedAt?: string
+  rejectedAt?: string
+  budgetYear: number
+  isHistorical?: boolean
+  historicalApprovedAt?: string
+}
+
+export interface DepartmentSalaryBudget {
+  departmentId: string
+  departmentName: string
+  totalBudget: number
+  usedAmount: number
+  pendingAmount: number
+  approvedCount: number
+  pendingCount: number
+  headcount: number
+  averageAdjustmentRatio: number
+}
+
+export interface AnnualSalaryBudget {
+  year: number
+  totalBudget: number
+  usedAmount: number
+  pendingAmount: number
+  reservedAmount: number
+  departments: DepartmentSalaryBudget[]
+  maxAdjustmentRatio: number
+  minAdjustmentRatio: number
+  defaultRatio: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SalaryHistoryRecord {
+  id: string
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  oldSalary: number
+  newSalary: number
+  adjustmentAmount: number
+  adjustmentRatio: number
+  reasonCategory: AdjustmentReasonCategory
+  reasonName: string
+  effectiveDate: string
+  approvedAt: string
+  applicantName: string
+  approverName: string
+  description?: string
+}
+
+export interface SalaryAdjustmentModuleData {
+  reasons: AdjustmentReason[]
+  approvalWorkflow: ApprovalNode[]
+  annualBudget: AnnualSalaryBudget | null
+  requests: SalaryAdjustmentRequest[]
+  salaryHistory: SalaryHistoryRecord[]
+}

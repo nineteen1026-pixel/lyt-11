@@ -79,6 +79,26 @@
             <template v-else-if="activeMenu === 'all'">
               <AllResultsTable />
             </template>
+
+            <template v-else-if="activeMenu === 'salary-list'">
+              <SalaryAdjustmentList />
+            </template>
+
+            <template v-else-if="activeMenu === 'salary-reasons'">
+              <AdjustmentReasonConfig />
+            </template>
+
+            <template v-else-if="activeMenu === 'salary-workflow'">
+              <ApprovalWorkflowConfig />
+            </template>
+
+            <template v-else-if="activeMenu === 'salary-budget'">
+              <SalaryBudgetDashboard />
+            </template>
+
+            <template v-else-if="activeMenu === 'salary-history'">
+              <SalaryHistoryTrace />
+            </template>
           </n-space>
         </n-layout-content>
 
@@ -119,19 +139,31 @@ import {
   TableOutlined,
   ImportOutlined,
   ExportOutlined,
-  TagsOutlined
+  TagsOutlined,
+  RiseOutlined,
+  FileTextOutlined,
+  ClusterOutlined,
+  PieChartOutlined,
+  HistoryOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
+import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import PerformanceCoefficientTable from '@/components/PerformanceCoefficientTable.vue'
 import BonusPoolConfig from '@/components/BonusPoolConfig.vue'
 import EmployeeDetail from '@/components/EmployeeDetail.vue'
 import OverviewDashboard from '@/components/OverviewDashboard.vue'
 import AllResultsTable from '@/components/AllResultsTable.vue'
 import EmployeeTagConfig from '@/components/EmployeeTagConfig.vue'
+import SalaryAdjustmentList from '@/components/SalaryAdjustmentList.vue'
+import AdjustmentReasonConfig from '@/components/AdjustmentReasonConfig.vue'
+import ApprovalWorkflowConfig from '@/components/ApprovalWorkflowConfig.vue'
+import SalaryBudgetDashboard from '@/components/SalaryBudgetDashboard.vue'
+import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
 import dayjs from 'dayjs'
-import type { AppData } from '@/types'
+import type { AppData, SalaryAdjustmentModuleData } from '@/types'
 
 const store = useBonusStore()
+const salaryStore = useSalaryAdjustmentStore()
 const message = useMessage()
 
 const collapsed = ref(false)
@@ -168,6 +200,38 @@ const menuOptions: MenuOption[] = [
     label: '全员测算表',
     key: 'all',
     icon: () => h(TableOutlined)
+  },
+  {
+    label: '调薪审批管理',
+    key: 'salary-group',
+    icon: () => h(RiseOutlined),
+    children: [
+      {
+        label: '调薪申请列表',
+        key: 'salary-list',
+        icon: () => h(FileTextOutlined)
+      },
+      {
+        label: '调薪事由配置',
+        key: 'salary-reasons',
+        icon: () => h(TagsOutlined)
+      },
+      {
+        label: '审批流程配置',
+        key: 'salary-workflow',
+        icon: () => h(ClusterOutlined)
+      },
+      {
+        label: '预算控盘',
+        key: 'salary-budget',
+        icon: () => h(PieChartOutlined)
+      },
+      {
+        label: '历史调薪轨迹',
+        key: 'salary-history',
+        icon: () => h(HistoryOutlined)
+      }
+    ]
   }
 ]
 
@@ -178,23 +242,30 @@ const currentTitle = computed(() => {
     tags: '🏷️ 员工标签管理',
     pool: '💰 奖金池与分配配置',
     calculate: '🧮 个人年终奖测算',
-    all: '📋 全员年终奖测算表'
+    all: '📋 全员年终奖测算表',
+    'salary-list': '📝 调薪申请列表',
+    'salary-reasons': '🏷️ 调薪事由配置',
+    'salary-workflow': '🔀 审批流程配置',
+    'salary-budget': '📊 预算控盘',
+    'salary-history': '📈 历史调薪轨迹'
   }
   return map[activeMenu.value] || ''
 })
 
 function handleExport() {
-  const data: AppData & { exportedAt: string; version: string } = {
+  const salaryData = salaryStore.exportModuleData()
+  const data: AppData & { salaryAdjustment: SalaryAdjustmentModuleData; exportedAt: string; version: string } = {
     ...store.exportData(),
+    salaryAdjustment: salaryData,
     exportedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-    version: '1.0.0'
+    version: '1.1.0'
   }
   const json = JSON.stringify(data, null, 2)
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `年终奖方案_${dayjs().format('YYYYMMDD_HHmmss')}.json`
+  a.download = `薪酬管理方案_${dayjs().format('YYYYMMDD_HHmmss')}.json`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -206,10 +277,17 @@ function handleImport({ file }: { file: File }) {
   const reader = new FileReader()
   reader.onload = (e) => {
     try {
-      const data = JSON.parse(e.target?.result as string) as AppData
+      const data = JSON.parse(e.target?.result as string) as AppData & { salaryAdjustment?: SalaryAdjustmentModuleData }
       const ok = store.importData(data)
       if (ok) {
-        message.success('方案导入成功')
+        if (data.salaryAdjustment) {
+          salaryStore.importModuleData(data.salaryAdjustment)
+          salaryStore.syncDepartmentsToBudget()
+          message.success('方案导入成功（含调薪审批模块数据）')
+        } else {
+          salaryStore.syncDepartmentsToBudget()
+          message.success('方案导入成功')
+        }
       } else {
         message.error('方案数据格式不正确')
       }
