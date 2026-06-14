@@ -12,7 +12,12 @@ import type {
   AnnualSalaryBudget,
   DepartmentSalaryBudget,
   SalaryHistoryRecord,
-  SalaryAdjustmentModuleData
+  SalaryAdjustmentModuleData,
+  PerformanceHistoryRecord,
+  BonusPaymentRecord,
+  EmployeeCompensationArchive,
+  ArchiveTimelineEvent,
+  ArchiveEventType
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -74,7 +79,134 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
 
   const salaryHistory = ref<SalaryHistoryRecord[]>([])
 
+  const performanceHistory = ref<PerformanceHistoryRecord[]>([])
+
+  const bonusPayments = ref<BonusPaymentRecord[]>([])
+
   const selectedRequestId = ref<string | null>(null)
+
+  function initMockHistoryData() {
+    const employees = bonusStore.allEmployees
+    const levels = bonusStore.performanceLevels
+
+    employees.forEach((emp) => {
+      const dept = bonusStore.getDepartmentById(emp.departmentId)
+      const deptName = dept?.name || ''
+
+      salaryHistory.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        departmentName: deptName,
+        position: emp.position,
+        oldSalary: round2(emp.baseSalary * 0.85),
+        newSalary: emp.baseSalary,
+        adjustmentAmount: round2(emp.baseSalary * 0.15),
+        adjustmentRatio: 0.15,
+        reasonCategory: 'annual',
+        reasonName: '年度普调',
+        effectiveDate: dayjs().subtract(1, 'year').format('YYYY-MM-DD'),
+        approvedAt: dayjs().subtract(1, 'year').add(1, 'month').format('YYYY-MM-DD HH:mm:ss'),
+        applicantName: 'HR主管',
+        approverName: '部门总监',
+        description: '2024年度统一薪资调整'
+      })
+
+      salaryHistory.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        departmentName: deptName,
+        position: emp.position,
+        oldSalary: round2(emp.baseSalary * 0.75),
+        newSalary: round2(emp.baseSalary * 0.85),
+        adjustmentAmount: round2(emp.baseSalary * 0.1),
+        adjustmentRatio: 0.1,
+        reasonCategory: 'performance',
+        reasonName: '卓越绩效',
+        effectiveDate: dayjs().subtract(2, 'year').format('YYYY-MM-DD'),
+        approvedAt: dayjs().subtract(2, 'year').add(1, 'month').format('YYYY-MM-DD HH:mm:ss'),
+        applicantName: '直属上级',
+        approverName: 'HR总监',
+        description: '上年度绩效优异，特别调薪'
+      })
+
+      const level = levels.find((l) => l.id === emp.performanceLevelId) || levels[0]
+      const prevLevel = levels[Math.max(0, levels.findIndex((l) => l.id === level.id) - 1)] || level
+
+      performanceHistory.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        year: dayjs().year() - 1,
+        half: 'annual',
+        levelId: level.id,
+        levelName: level.name,
+        coefficient: level.coefficient,
+        reviewerName: '部门总监',
+        reviewedAt: dayjs().subtract(3, 'month').format('YYYY-MM-DD HH:mm:ss'),
+        comment: '工作表现优秀，超额完成年度目标'
+      })
+
+      performanceHistory.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        year: dayjs().year() - 2,
+        half: 'annual',
+        levelId: prevLevel.id,
+        levelName: prevLevel.name,
+        coefficient: prevLevel.coefficient,
+        reviewerName: '部门总监',
+        reviewedAt: dayjs().subtract(1, 'year').subtract(3, 'month').format('YYYY-MM-DD HH:mm:ss'),
+        comment: '符合预期，达成年度工作目标'
+      })
+
+      const bonusAmount = round2(emp.baseSalary * 3 * level.coefficient)
+      const taxAmount = round2(bonusAmount * 0.1)
+      bonusPayments.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        departmentName: deptName,
+        year: dayjs().year() - 1,
+        type: 'year_end',
+        name: '2024年度年终奖',
+        grossAmount: bonusAmount,
+        taxAmount: taxAmount,
+        netAmount: round2(bonusAmount - taxAmount),
+        taxMethod: 'oneTime',
+        paymentDate: dayjs().subtract(2, 'month').format('YYYY-MM-DD'),
+        description: '根据年度绩效和司龄计算的年终奖金',
+        approvalStatus: 'approved',
+        approverName: 'CEO',
+        approvedAt: dayjs().subtract(2, 'month').subtract(7, 'day').format('YYYY-MM-DD HH:mm:ss')
+      })
+
+      const bonusAmount2 = round2(emp.baseSalary * 2.5 * prevLevel.coefficient)
+      const taxAmount2 = round2(bonusAmount2 * 0.1)
+      bonusPayments.value.push({
+        id: generateId(),
+        employeeId: emp.id,
+        employeeName: emp.name,
+        departmentName: deptName,
+        year: dayjs().year() - 2,
+        type: 'year_end',
+        name: '2023年度年终奖',
+        grossAmount: bonusAmount2,
+        taxAmount: taxAmount2,
+        netAmount: round2(bonusAmount2 - taxAmount2),
+        taxMethod: 'oneTime',
+        paymentDate: dayjs().subtract(1, 'year').subtract(2, 'month').format('YYYY-MM-DD'),
+        description: '根据年度绩效和司龄计算的年终奖金',
+        approvalStatus: 'approved',
+        approverName: 'CEO',
+        approvedAt: dayjs().subtract(1, 'year').subtract(2, 'month').subtract(7, 'day').format('YYYY-MM-DD HH:mm:ss')
+      })
+    })
+  }
+
+  initMockHistoryData()
 
   function createInitialBudget(): AnnualSalaryBudget {
     const deptBudgets: DepartmentSalaryBudget[] = bonusStore.departments.map((dept) => {
@@ -566,6 +698,185 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       .sort((a, b) => dayjs(b.approvedAt).valueOf() - dayjs(a.approvedAt).valueOf())
   }
 
+  function getEmployeePerformanceHistory(employeeId: string): PerformanceHistoryRecord[] {
+    return performanceHistory.value
+      .filter((h) => h.employeeId === employeeId)
+      .sort((a, b) => dayjs(b.reviewedAt).valueOf() - dayjs(a.reviewedAt).valueOf())
+  }
+
+  function getEmployeeBonusPayments(employeeId: string): BonusPaymentRecord[] {
+    return bonusPayments.value
+      .filter((b) => b.employeeId === employeeId)
+      .sort((a, b) => dayjs(b.paymentDate).valueOf() - dayjs(a.paymentDate).valueOf())
+  }
+
+  function getEmployeeApprovalRequests(employeeId: string): SalaryAdjustmentRequest[] {
+    return requests.value
+      .filter((r) => r.employeeId === employeeId)
+      .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf())
+  }
+
+  const EVENT_TYPE_LABELS: Record<ArchiveEventType, string> = {
+    salary_adjustment: '调薪',
+    bonus_payment: '奖金发放',
+    performance_review: '绩效评级',
+    approval_record: '审批记录'
+  }
+
+  const EVENT_TYPE_COLORS: Record<ArchiveEventType, string> = {
+    salary_adjustment: '#1890ff',
+    bonus_payment: '#52c41a',
+    performance_review: '#722ed1',
+    approval_record: '#fa8c16'
+  }
+
+  const BONUS_TYPE_LABELS: Record<string, string> = {
+    year_end: '年终奖',
+    performance: '绩效奖',
+    special: '特别奖',
+    other: '其他'
+  }
+
+  function getEventTypeLabel(type: ArchiveEventType): string {
+    return EVENT_TYPE_LABELS[type] || type
+  }
+
+  function getEventTypeColor(type: ArchiveEventType): string {
+    return EVENT_TYPE_COLORS[type] || '#8c8c8c'
+  }
+
+  function getBonusTypeLabel(type: string): string {
+    return BONUS_TYPE_LABELS[type] || type
+  }
+
+  function buildEmployeeArchive(employeeId: string): EmployeeCompensationArchive | null {
+    const emp = bonusStore.getEmployeeById(employeeId)
+    if (!emp) return null
+
+    const dept = bonusStore.getDepartmentById(emp.departmentId)
+    const deptName = dept?.name || ''
+
+    const salaryHist = getEmployeeHistory(employeeId)
+    const perfHist = getEmployeePerformanceHistory(employeeId)
+    const bonusHist = getEmployeeBonusPayments(employeeId)
+    const approvalReqs = getEmployeeApprovalRequests(employeeId)
+
+    const events: ArchiveTimelineEvent[] = []
+
+    salaryHist.forEach((h) => {
+      events.push({
+        id: `salary_${h.id}`,
+        type: 'salary_adjustment',
+        date: h.effectiveDate,
+        title: `${h.reasonName} - 调薪`,
+        description: `${formatMoney(h.oldSalary)} → ${formatMoney(h.newSalary)}，涨幅 ${(h.adjustmentRatio * 100).toFixed(2)}%`,
+        amount: h.adjustmentAmount,
+        amountLabel: '调薪金额',
+        status: '已生效',
+        statusColor: '#52c41a',
+        tags: [getCategoryLabel(h.reasonCategory)],
+        detail: h,
+        relatedRecordId: h.id
+      })
+    })
+
+    bonusHist.forEach((b) => {
+      events.push({
+        id: `bonus_${b.id}`,
+        type: 'bonus_payment',
+        date: b.paymentDate,
+        title: b.name,
+        description: `${getBonusTypeLabel(b.type)}，税前 ${formatMoney(b.grossAmount)}，税后 ${formatMoney(b.netAmount)}`,
+        amount: b.netAmount,
+        amountLabel: '实发奖金',
+        status: getStatusLabel(b.approvalStatus),
+        statusColor: getStatusColor(b.approvalStatus),
+        tags: [getBonusTypeLabel(b.type)],
+        detail: b,
+        relatedRecordId: b.id
+      })
+    })
+
+    perfHist.forEach((p) => {
+      events.push({
+        id: `perf_${p.id}`,
+        type: 'performance_review',
+        date: p.reviewedAt.slice(0, 10),
+        title: `${p.year}年度绩效评级`,
+        description: `绩效等级：${p.levelName}（系数 ${p.coefficient}x），评定人：${p.reviewerName}`,
+        status: p.levelName,
+        statusColor: getPerformanceLevelColor(p.levelName),
+        tags: [`${p.year}年`, p.half === 'annual' ? '年度' : p.half === 'first' ? '上半年' : '下半年'],
+        detail: p,
+        relatedRecordId: p.id
+      })
+    })
+
+    approvalReqs.forEach((r) => {
+      events.push({
+        id: `approval_${r.id}`,
+        type: 'approval_record',
+        date: r.createdAt.slice(0, 10),
+        title: `调薪申请 - ${r.reasonName}`,
+        description: `申请单号：${r.requestNo}，申请调薪 ${formatMoney(r.adjustmentAmount)}，当前状态：${getStatusLabel(r.status)}`,
+        amount: r.adjustmentAmount,
+        amountLabel: '申请调薪额',
+        status: getStatusLabel(r.status),
+        statusColor: getStatusColor(r.status),
+        tags: [r.requestNo],
+        detail: r,
+        relatedRecordId: r.id
+      })
+    })
+
+    events.sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
+
+    const totalAdjustmentAmount = salaryHist.reduce((sum, h) => sum + h.adjustmentAmount, 0)
+    const totalBonusGross = bonusHist.reduce((sum, b) => sum + b.grossAmount, 0)
+    const totalBonusNet = bonusHist.reduce((sum, b) => sum + b.netAmount, 0)
+
+    const currentLevel = perfHist.length > 0 ? perfHist[0].levelName : '-'
+    const currentCoefficient = perfHist.length > 0 ? perfHist[0].coefficient : 1
+
+    return {
+      employeeId: emp.id,
+      employeeName: emp.name,
+      departmentName: deptName,
+      position: emp.position,
+      baseSalary: emp.baseSalary,
+      events,
+      salaryHistory: salaryHist,
+      bonusHistory: bonusHist,
+      performanceHistory: perfHist,
+      summary: {
+        totalSalaryAdjustments: salaryHist.length,
+        totalAdjustmentAmount,
+        totalBonusPayments: bonusHist.length,
+        totalBonusGross,
+        totalBonusNet,
+        performanceRecords: perfHist.length,
+        currentLevel,
+        currentCoefficient
+      }
+    }
+  }
+
+  function formatMoney(n: number): string {
+    return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  function getPerformanceLevelColor(levelName: string): string {
+    const colorMap: Record<string, string> = {
+      S: '#f5222d',
+      'A+': '#fa8c16',
+      A: '#faad14',
+      'B+': '#52c41a',
+      B: '#1890ff',
+      C: '#8c8c8c'
+    }
+    return colorMap[levelName] || '#8c8c8c'
+  }
+
   function updateAnnualBudget(updates: Partial<AnnualSalaryBudget>) {
     if (!annualBudget.value) return
     annualBudget.value = {
@@ -625,7 +936,9 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       approvalWorkflow: approvalWorkflow.value,
       annualBudget: annualBudget.value,
       requests: requests.value,
-      salaryHistory: salaryHistory.value
+      salaryHistory: salaryHistory.value,
+      performanceHistory: performanceHistory.value,
+      bonusPayments: bonusPayments.value
     }
   }
 
@@ -636,6 +949,8 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       annualBudget.value = data.annualBudget
       requests.value = data.requests || []
       salaryHistory.value = data.salaryHistory || []
+      performanceHistory.value = data.performanceHistory || []
+      bonusPayments.value = data.bonusPayments || []
       return true
     } catch {
       return false
@@ -648,6 +963,8 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     annualBudget,
     requests,
     salaryHistory,
+    performanceHistory,
+    bonusPayments,
     selectedRequestId,
     sortedWorkflow,
     enabledReasons,
@@ -659,12 +976,18 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     CATEGORY_LABELS,
     STATUS_LABELS,
     NODE_TYPE_LABELS,
+    EVENT_TYPE_LABELS,
+    EVENT_TYPE_COLORS,
+    BONUS_TYPE_LABELS,
     getCategoryLabel,
     getStatusLabel,
     getNodeTypeLabel,
     getStatusColor,
     getNodeStatusColor,
     getNodeStatusLabel,
+    getEventTypeLabel,
+    getEventTypeColor,
+    getBonusTypeLabel,
     addReason,
     updateReason,
     removeReason,
@@ -683,6 +1006,11 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     withdrawRequest,
     deleteRequest,
     getEmployeeHistory,
+    getEmployeePerformanceHistory,
+    getEmployeeBonusPayments,
+    getEmployeeApprovalRequests,
+    buildEmployeeArchive,
+    getPerformanceLevelColor,
     updateAnnualBudget,
     updateDepartmentBudget,
     syncDepartmentsToBudget,

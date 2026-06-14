@@ -99,6 +99,10 @@
             <template v-else-if="activeMenu === 'salary-history'">
               <SalaryHistoryTrace />
             </template>
+
+            <template v-else-if="activeMenu === 'compensation-archive'">
+              <EmployeeCompensationArchive />
+            </template>
           </n-space>
         </n-layout-content>
 
@@ -144,7 +148,8 @@ import {
   FileTextOutlined,
   ClusterOutlined,
   PieChartOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  ProfileOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
@@ -159,6 +164,7 @@ import AdjustmentReasonConfig from '@/components/AdjustmentReasonConfig.vue'
 import ApprovalWorkflowConfig from '@/components/ApprovalWorkflowConfig.vue'
 import SalaryBudgetDashboard from '@/components/SalaryBudgetDashboard.vue'
 import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
+import EmployeeCompensationArchive from '@/components/EmployeeCompensationArchive.vue'
 import dayjs from 'dayjs'
 import type { AppData, SalaryAdjustmentModuleData } from '@/types'
 
@@ -230,6 +236,11 @@ const menuOptions: MenuOption[] = [
         label: '历史调薪轨迹',
         key: 'salary-history',
         icon: () => h(HistoryOutlined)
+      },
+      {
+        label: '员工薪酬档案',
+        key: 'compensation-archive',
+        icon: () => h(ProfileOutlined)
       }
     ]
   }
@@ -247,7 +258,8 @@ const currentTitle = computed(() => {
     'salary-reasons': '🏷️ 调薪事由配置',
     'salary-workflow': '🔀 审批流程配置',
     'salary-budget': '📊 预算控盘',
-    'salary-history': '📈 历史调薪轨迹'
+    'salary-history': '📈 历史调薪轨迹',
+    'compensation-archive': '📁 员工薪酬档案'
   }
   return map[activeMenu.value] || ''
 })

@@ -229,10 +229,89 @@ export interface SalaryHistoryRecord {
   description?: string
 }
 
+export interface PerformanceHistoryRecord {
+  id: string
+  employeeId: string
+  employeeName: string
+  year: number
+  half: 'first' | 'second' | 'annual'
+  levelId: string
+  levelName: string
+  coefficient: number
+  reviewerName: string
+  reviewedAt: string
+  comment?: string
+}
+
+export interface BonusPaymentRecord {
+  id: string
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  year: number
+  type: 'year_end' | 'performance' | 'special' | 'other'
+  name: string
+  grossAmount: number
+  taxAmount: number
+  netAmount: number
+  taxMethod: TaxMethod
+  paymentDate: string
+  description?: string
+  approvalStatus: ApprovalStatus
+  approverName?: string
+  approvedAt?: string
+}
+
+export type ArchiveEventType =
+  | 'salary_adjustment'
+  | 'bonus_payment'
+  | 'performance_review'
+  | 'approval_record'
+
+export interface ArchiveTimelineEvent {
+  id: string
+  type: ArchiveEventType
+  date: string
+  title: string
+  description: string
+  amount?: number
+  amountLabel?: string
+  status?: string
+  statusColor?: string
+  tags?: string[]
+  detail?: any
+  relatedRecordId?: string
+}
+
+export interface EmployeeCompensationArchive {
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  baseSalary: number
+  hireDate?: string
+  events: ArchiveTimelineEvent[]
+  salaryHistory: SalaryHistoryRecord[]
+  bonusHistory: BonusPaymentRecord[]
+  performanceHistory: PerformanceHistoryRecord[]
+  summary: {
+    totalSalaryAdjustments: number
+    totalAdjustmentAmount: number
+    totalBonusPayments: number
+    totalBonusGross: number
+    totalBonusNet: number
+    performanceRecords: number
+    currentLevel: string
+    currentCoefficient: number
+  }
+}
+
 export interface SalaryAdjustmentModuleData {
   reasons: AdjustmentReason[]
   approvalWorkflow: ApprovalNode[]
   annualBudget: AnnualSalaryBudget | null
   requests: SalaryAdjustmentRequest[]
   salaryHistory: SalaryHistoryRecord[]
+  performanceHistory: PerformanceHistoryRecord[]
+  bonusPayments: BonusPaymentRecord[]
 }
