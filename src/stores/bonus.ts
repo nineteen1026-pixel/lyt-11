@@ -671,20 +671,24 @@ export const useBonusStore = defineStore('bonus', () => {
     }
   }
 
-  function calculateSortScore(employee: Employee): number {
-    const level = performanceLevels.value.find((l) => l.id === employee.performanceLevelId)
-    const levelScore = level ? level.coefficient : 1
-    const salaryScore = employee.baseSalary / 10000
-    const tenureScore = Math.min(employee.yearsOfService, 10) * 0.1
-    return levelScore * 10 + salaryScore * 0.5 + tenureScore
-  }
-
   function getCalibrationEmployees(scope: CalibrationScope, scopeId: string): Employee[] {
     if (scope === 'company') {
       return allEmployees.value
     }
     const dept = departments.value.find((d) => d.id === scopeId)
     return dept ? dept.employees : []
+  }
+
+  function generateDefaultScore(employee: Employee): number {
+    const levelIndex = performanceLevels.value.findIndex((l) => l.id === employee.performanceLevelId)
+    const levelBase = (performanceLevels.value.length - levelIndex) * 10
+    const salaryFactor = employee.baseSalary / 10000
+    const tenureFactor = Math.min(employee.yearsOfService, 10) * 0.5
+    let score = 80 + levelBase + salaryFactor * 0.5 + tenureFactor
+    score = Math.max(0, Math.min(100, score))
+    score += (Math.random() - 0.5) * 5
+    score = Math.max(0, Math.min(100, score))
+    return round2(score)
   }
 
   function startCalibration() {
@@ -711,14 +715,14 @@ export const useBonusStore = defineStore('bonus', () => {
         calibratedLevelId: null,
         calibratedLevelName: null,
         calibratedCoefficient: null,
-        sortScore: calculateSortScore(emp),
+        performanceScore: generateDefaultScore(emp),
         originalRank: index + 1,
         calibratedRank: null,
         changed: false
       }
     })
 
-    calibratedEmployees.sort((a, b) => b.sortScore - a.sortScore)
+    calibratedEmployees.sort((a, b) => b.performanceScore - a.performanceScore)
     calibratedEmployees.forEach((emp, idx) => {
       emp.originalRank = idx + 1
     })
@@ -757,46 +761,68 @@ export const useBonusStore = defineStore('bonus', () => {
     const employees = [...currentCalibration.value.employees]
     const totalCount = employees.length
 
-    employees.sort((a, b) => b.sortScore - a.sortScore)
+    employees.sort((a, b) => b.performanceScore - a.performanceScore)
 
-    const levelMaxCounts: { levelId: string; levelName: string; maxCount: number; coefficient: number }[] = []
+    const levelInfoList: { levelId: string; levelName: string; coefficient: number; ratio: number; baseQuota: number; finalQuota: number }[] = []
     for (const ratio of performanceDistributionRatios.value) {
       const level = performanceLevels.value.find((l) => l.id === ratio.levelId)
       if (level) {
-        levelMaxCounts.push({
+        levelInfoList.push({
           levelId: level.id,
           levelName: level.name,
-          maxCount: Math.floor(totalCount * ratio.maxRatio),
-          coefficient: level.coefficient
+          coefficient: level.coefficient,
+          ratio: ratio.maxRatio,
+          baseQuota: Math.floor(totalCount * ratio.maxRatio),
+          finalQuota: 0
         })
       }
     }
 
-    levelMaxCounts.sort((a, b) => b.coefficient - a.coefficient)
+    levelInfoList.sort((a, b) => b.coefficient - a.coefficient)
 
-    let assignedCount = 0
-    for (const levelInfo of levelMaxCounts) {
-      const endIdx = Math.min(assignedCount + levelInfo.maxCount, totalCount)
-      for (let i = assignedCount; i < endIdx; i++) {
-        const emp = employees[i]
+    const sumBaseQuota = levelInfoList.reduce((s, l) => s + l.baseQuota, 0)
+    let remainder = totalCount - sumBaseQuota
+
+    levelInfoList.forEach((info) => {
+      info.finalQuota = info.baseQuota
+    })
+
+    let levelCursor = 0
+    while (remainder > 0 && levelInfoList.length > 0) {
+      levelInfoList[levelCursor % levelInfoList.length].finalQuota += 1
+      remainder -= 1
+      levelCursor += 1
+    }
+
+    const assignedLevelIds: string[] = []
+    for (const levelInfo of levelInfoList) {
+      for (let i = 0; i < levelInfo.finalQuota; i++) {
+        assignedLevelIds.push(levelInfo.levelId)
+      }
+    }
+
+    for (let i = 0; i < totalCount && i < assignedLevelIds.length; i++) {
+      const emp = employees[i]
+      const levelId = assignedLevelIds[i]
+      const levelInfo = levelInfoList.find((l) => l.levelId === levelId)
+      if (levelInfo) {
         emp.calibratedLevelId = levelInfo.levelId
         emp.calibratedLevelName = levelInfo.levelName
         emp.calibratedCoefficient = levelInfo.coefficient
         emp.calibratedRank = i + 1
         emp.changed = emp.currentLevelId !== levelInfo.levelId
       }
-      assignedCount = endIdx
     }
 
-    if (assignedCount < totalCount) {
-      const lastLevel = levelMaxCounts[levelMaxCounts.length - 1]
-      for (let i = assignedCount; i < totalCount; i++) {
+    if (totalCount > assignedLevelIds.length && levelInfoList.length > 0) {
+      const firstLevel = levelInfoList[0]
+      for (let i = assignedLevelIds.length; i < totalCount; i++) {
         const emp = employees[i]
-        emp.calibratedLevelId = lastLevel.levelId
-        emp.calibratedLevelName = lastLevel.levelName
-        emp.calibratedCoefficient = lastLevel.coefficient
+        emp.calibratedLevelId = firstLevel.levelId
+        emp.calibratedLevelName = firstLevel.levelName
+        emp.calibratedCoefficient = firstLevel.coefficient
         emp.calibratedRank = i + 1
-        emp.changed = emp.currentLevelId !== lastLevel.levelId
+        emp.changed = emp.currentLevelId !== firstLevel.levelId
       }
     }
 
@@ -812,6 +838,15 @@ export const useBonusStore = defineStore('bonus', () => {
 
     currentCalibration.value.employees = employees
     currentCalibration.value.levelDistribution = levelDistribution
+  }
+
+  function updateEmployeeScore(employeeId: string, score: number) {
+    if (!currentCalibration.value) return
+    const emp = currentCalibration.value.employees.find((e) => e.employeeId === employeeId)
+    if (emp) {
+      emp.performanceScore = Math.max(0, Math.min(100, score))
+      executeCalibration()
+    }
   }
 
   function adjustEmployeeLevel(employeeId: string, newLevelId: string) {
@@ -983,6 +1018,7 @@ export const useBonusStore = defineStore('bonus', () => {
     startCalibration,
     executeCalibration,
     adjustEmployeeLevel,
+    updateEmployeeScore,
     confirmCalibration,
     applyCalibration,
     saveCalibration,

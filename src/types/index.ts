@@ -26,7 +26,7 @@ export interface CalibrationEmployee {
   calibratedLevelId: string | null
   calibratedLevelName: string | null
   calibratedCoefficient: number | null
-  sortScore: number
+  performanceScore: number
   originalRank: number
   calibratedRank: number | null
   changed: boolean

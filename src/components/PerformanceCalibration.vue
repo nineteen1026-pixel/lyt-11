@@ -363,10 +363,29 @@ const employeeColumns: DataTableColumns = [
     render: (row: any) => formatCurrency(row.baseSalary)
   },
   {
-    title: '排序分数',
-    key: 'sortScore',
-    width: 100,
-    render: (row: any) => row.sortScore.toFixed(2)
+    title: '本期业绩评分',
+    key: 'performanceScore',
+    width: 160,
+    render: (row: any) => {
+      if (store.currentCalibration?.status === 'draft') {
+        return h('n-input-number', {
+          value: row.performanceScore,
+          min: 0,
+          max: 100,
+          step: 0.5,
+          size: 'small',
+          style: { width: '120px' },
+          onUpdateValue: (v: number) => {
+            store.updateEmployeeScore(row.employeeId, v)
+          }
+        })
+      }
+      return h(
+        'n-text',
+        { strong: true, type: 'primary' },
+        { default: () => row.performanceScore.toFixed(1) }
+      )
+    }
   }
 ]
 
