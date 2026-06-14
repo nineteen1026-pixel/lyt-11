@@ -8,7 +8,7 @@
         </n-space>
         <n-space>
           <n-button type="primary" ghost @click="handleExport" :disabled="!selectedEmployeeId">
-            <template #icon><ExportOutlined /></template>
+            <template #icon><PrinterOutlined /></template>
             导出离职交接附件
           </n-button>
         </n-space>
@@ -78,7 +78,7 @@
       </n-card>
 
       <n-card title="筛选条件">
-        <n-space :size="16" wrap>
+        <n-space :size="16" wrap align="start">
           <n-space vertical :size="6">
             <n-text depth="3" style="font-size: 12px">事件类型</n-text>
             <n-space>
@@ -101,6 +101,39 @@
               clearable
               style="width: 280px"
               placeholder="选择日期范围"
+            />
+          </n-space>
+
+          <n-space vertical :size="6">
+            <n-text depth="3" style="font-size: 12px">事由分类</n-text>
+            <n-select
+              v-model:value="filterReasonCategory"
+              :options="reasonCategoryOptions"
+              placeholder="全部事由"
+              style="width: 140px"
+              clearable
+            />
+          </n-space>
+
+          <n-space vertical :size="6">
+            <n-text depth="3" style="font-size: 12px">奖金类型</n-text>
+            <n-select
+              v-model:value="filterBonusType"
+              :options="bonusTypeOptions"
+              placeholder="全部类型"
+              style="width: 140px"
+              clearable
+            />
+          </n-space>
+
+          <n-space vertical :size="6">
+            <n-text depth="3" style="font-size: 12px">绩效等级</n-text>
+            <n-select
+              v-model:value="filterPerformanceLevel"
+              :options="performanceLevelOptions"
+              placeholder="全部等级"
+              style="width: 140px"
+              clearable
             />
           </n-space>
 
@@ -228,7 +261,7 @@
           <n-tab-pane name="salary" tab="调薪记录">
             <n-data-table
               :columns="salaryColumns"
-              :data="archive.salaryHistory"
+              :data="filteredSalaryHistory"
               :row-key="(row: any) => row.id"
               striped
               :pagination="{ pageSize: 5, showSizePicker: true, pageSizes: [5, 10, 20] }"
@@ -237,7 +270,7 @@
           <n-tab-pane name="bonus" tab="奖金发放">
             <n-data-table
               :columns="bonusColumns"
-              :data="archive.bonusHistory"
+              :data="filteredBonusHistory"
               :row-key="(row: any) => row.id"
               striped
               :pagination="{ pageSize: 5, showSizePicker: true, pageSizes: [5, 10, 20] }"
@@ -246,7 +279,7 @@
           <n-tab-pane name="performance" tab="绩效评级">
             <n-data-table
               :columns="performanceColumns"
-              :data="archive.performanceHistory"
+              :data="filteredPerformanceHistory"
               :row-key="(row: any) => row.id"
               striped
               :pagination="{ pageSize: 5, showSizePicker: true, pageSizes: [5, 10, 20] }"
@@ -274,11 +307,11 @@ import {
   WalletOutlined,
   StarOutlined,
   FileTextOutlined,
-  ExportOutlined
+  PrinterOutlined
 } from '@vicons/antd'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import { useBonusStore } from '@/stores/bonus'
-import type { ArchiveEventType, EmployeeCompensationArchive } from '@/types'
+import type { ArchiveEventType, EmployeeCompensationArchive, AdjustmentReasonCategory } from '@/types'
 import dayjs from 'dayjs'
 
 const store = useSalaryAdjustmentStore()
@@ -289,6 +322,9 @@ const selectedEmployeeId = ref<string | null>(null)
 const selectedTypes = ref<ArchiveEventType[]>(['salary_adjustment', 'bonus_payment', 'performance_review', 'approval_record'])
 const dateRange = ref<[number, number] | null>(null)
 const activeTab = ref('salary')
+const filterReasonCategory = ref<AdjustmentReasonCategory | null>(null)
+const filterBonusType = ref<string | null>(null)
+const filterPerformanceLevel = ref<string | null>(null)
 
 const eventTypes = [
   { value: 'salary_adjustment' as ArchiveEventType, label: '调薪', color: '#1890ff' },
@@ -296,6 +332,41 @@ const eventTypes = [
   { value: 'performance_review' as ArchiveEventType, label: '绩效', color: '#722ed1' },
   { value: 'approval_record' as ArchiveEventType, label: '审批', color: '#fa8c16' }
 ]
+
+const reasonCategoryOptions = computed(() => {
+  const cats = new Set<AdjustmentReasonCategory>()
+  if (archive.value) {
+    archive.value.salaryHistory.forEach((h) => cats.add(h.reasonCategory))
+  }
+  return Array.from(cats).map((c) => ({
+    label: store.getCategoryLabel(c),
+    value: c
+  }))
+})
+
+const bonusTypeOptions = computed(() => {
+  const types = new Set<string>()
+  if (archive.value) {
+    archive.value.bonusHistory.forEach((b) => types.add(b.type))
+  }
+  return Array.from(types).map((t) => ({
+    label: store.getBonusTypeLabel(t),
+    value: t
+  }))
+})
+
+const performanceLevelOptions = computed(() => {
+  const levels = new Set<string>()
+  if (archive.value) {
+    archive.value.performanceHistory.forEach((p) => {
+      levels.add(p.levelName)
+    })
+  }
+  return Array.from(levels).map((l) => ({
+    label: l,
+    value: l
+  }))
+})
 
 const employeeOptions = computed(() =>
   bonusStore.allEmployees.map((emp) => {
@@ -312,18 +383,74 @@ const archive = computed<EmployeeCompensationArchive | null>(() => {
   return store.buildEmployeeArchive(selectedEmployeeId.value)
 })
 
+function matchDateRange(dateStr: string): boolean {
+  if (!dateRange.value || !dateRange.value[0] || !dateRange.value[1]) return true
+  const d = dayjs(dateStr)
+  return d.isAfter(dayjs(dateRange.value[0]).subtract(1, 'day')) && d.isBefore(dayjs(dateRange.value[1]).add(1, 'day'))
+}
+
+const filteredSalaryHistory = computed(() => {
+  if (!archive.value) return []
+  let list = [...archive.value.salaryHistory]
+  if (filterReasonCategory.value) {
+    list = list.filter((h) => h.reasonCategory === filterReasonCategory.value)
+  }
+  list = list.filter((h) => matchDateRange(h.effectiveDate))
+  return list
+})
+
+const filteredBonusHistory = computed(() => {
+  if (!archive.value) return []
+  let list = [...archive.value.bonusHistory]
+  if (filterBonusType.value) {
+    list = list.filter((b) => b.type === filterBonusType.value)
+  }
+  list = list.filter((b) => matchDateRange(b.paymentDate))
+  return list
+})
+
+const filteredPerformanceHistory = computed(() => {
+  if (!archive.value) return []
+  let list = [...archive.value.performanceHistory]
+  if (filterPerformanceLevel.value) {
+    list = list.filter((p) => p.levelName === filterPerformanceLevel.value)
+  }
+  list = list.filter((p) => matchDateRange(p.reviewedAt))
+  return list
+})
+
 const filteredEvents = computed(() => {
   if (!archive.value) return []
   let events = [...archive.value.events]
 
   events = events.filter((e) => selectedTypes.value.includes(e.type))
 
-  if (dateRange.value && dateRange.value[0] && dateRange.value[1]) {
-    const start = dayjs(dateRange.value[0])
-    const end = dayjs(dateRange.value[1])
+  events = events.filter((e) => matchDateRange(e.date))
+
+  if (filterReasonCategory.value) {
     events = events.filter((e) => {
-      const eventDate = dayjs(e.date)
-      return eventDate.isAfter(start.subtract(1, 'day')) && eventDate.isBefore(end.add(1, 'day'))
+      if (e.type === 'salary_adjustment') {
+        return e.detail?.reasonCategory === filterReasonCategory.value
+      }
+      return true
+    })
+  }
+
+  if (filterBonusType.value) {
+    events = events.filter((e) => {
+      if (e.type === 'bonus_payment') {
+        return e.detail?.type === filterBonusType.value
+      }
+      return true
+    })
+  }
+
+  if (filterPerformanceLevel.value) {
+    events = events.filter((e) => {
+      if (e.type === 'performance_review') {
+        return e.detail?.levelName === filterPerformanceLevel.value
+      }
+      return true
     })
   }
 
@@ -437,7 +564,195 @@ function setQuickFilter(period: string) {
 }
 
 function handleEmployeeChange() {
-  // handled by computed
+  filterReasonCategory.value = null
+  filterBonusType.value = null
+  filterPerformanceLevel.value = null
+}
+
+function buildHtmlDocument(): string {
+  if (!archive.value) return ''
+
+  const a = archive.value
+  const events = filteredEvents.value
+  const salaryData = filteredSalaryHistory.value
+  const bonusData = filteredBonusHistory.value
+  const perfData = filteredPerformanceHistory.value
+  const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+  const typeLabel: Record<string, string> = {
+    salary_adjustment: '调薪',
+    bonus_payment: '奖金发放',
+    performance_review: '绩效评级',
+    approval_record: '审批记录'
+  }
+  const typeColor: Record<string, string> = {
+    salary_adjustment: '#1890ff',
+    bonus_payment: '#52c41a',
+    performance_review: '#722ed1',
+    approval_record: '#fa8c16'
+  }
+
+  const timelineRows = events.map((e) => `
+    <tr>
+      <td style="white-space:nowrap">${e.date}</td>
+      <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;background:${typeColor[e.type]}20;color:${typeColor[e.type]}">${typeLabel[e.type]}</span></td>
+      <td>${e.title}</td>
+      <td>${e.description}</td>
+      <td>${e.amount !== undefined ? formatMoney(e.amount) : '-'}</td>
+      <td>${e.status || '-'}</td>
+    </tr>
+  `).join('')
+
+  const salaryRows = salaryData.map((r) => `
+    <tr>
+      <td>${r.effectiveDate}</td>
+      <td>${store.getCategoryLabel(r.reasonCategory)}</td>
+      <td>${r.reasonName}</td>
+      <td>${formatMoney(r.oldSalary)}</td>
+      <td>${formatMoney(r.newSalary)}</td>
+      <td style="color:#52c41a">+${formatMoney(r.adjustmentAmount)}</td>
+      <td style="color:#52c41a">+${(r.adjustmentRatio * 100).toFixed(2)}%</td>
+      <td>${r.applicantName}</td>
+      <td>${r.approverName || '-'}</td>
+    </tr>
+  `).join('')
+
+  const bonusRows = bonusData.map((r) => `
+    <tr>
+      <td>${r.paymentDate}</td>
+      <td>${store.getBonusTypeLabel(r.type)}</td>
+      <td>${r.name}</td>
+      <td>${formatMoney(r.grossAmount)}</td>
+      <td style="color:#f5222d">${formatMoney(r.taxAmount)}</td>
+      <td style="color:#52c41a;font-weight:600">${formatMoney(r.netAmount)}</td>
+      <td>${r.taxMethod === 'oneTime' ? '单独计税' : '综合计税'}</td>
+      <td>${store.getStatusLabel(r.approvalStatus)}</td>
+    </tr>
+  `).join('')
+
+  const perfRows = perfData.map((r) => `
+    <tr>
+      <td>${r.year}</td>
+      <td>${r.half === 'annual' ? '年度' : r.half === 'first' ? '上半年' : '下半年'}</td>
+      <td style="color:${store.getPerformanceLevelColor(r.levelName)};font-weight:600">${r.levelName}</td>
+      <td>${r.coefficient}x</td>
+      <td>${r.reviewerName}</td>
+      <td>${r.reviewedAt?.slice(0, 10) || '-'}</td>
+      <td>${r.comment || '-'}</td>
+    </tr>
+  `).join('')
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>${a.employeeName}_薪酬档案_${dayjs().format('YYYYMMDD')}</title>
+<style>
+  @page { size: A4; margin: 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.6; font-size: 13px; }
+  .header { text-align: center; padding: 24px 0 16px; border-bottom: 3px solid #2080f0; margin-bottom: 20px; }
+  .header h1 { font-size: 22px; color: #2080f0; margin-bottom: 4px; }
+  .header p { color: #8c8c8c; font-size: 12px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 32px; background: #f6f8fa; border-radius: 8px; padding: 16px 24px; margin-bottom: 20px; }
+  .info-item { display: flex; gap: 8px; }
+  .info-label { color: #8c8c8c; min-width: 80px; }
+  .info-value { font-weight: 600; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .summary-card { text-align: center; padding: 12px; border-radius: 8px; }
+  .summary-card .label { font-size: 12px; color: #8c8c8c; margin-bottom: 4px; }
+  .summary-card .value { font-size: 20px; font-weight: 700; }
+  .summary-card .sub { font-size: 11px; color: #8c8c8c; margin-top: 2px; }
+  .sc-salary { background: #e6f7ff; }
+  .sc-bonus { background: #f6ffed; }
+  .sc-perf { background: #f9f0ff; }
+  .sc-total { background: #fff7e6; }
+  h2 { font-size: 16px; color: #262626; margin: 20px 0 10px; padding-left: 8px; border-left: 3px solid #2080f0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }
+  th, td { border: 1px solid #e8e8e8; padding: 6px 10px; text-align: left; }
+  th { background: #fafafa; font-weight: 600; color: #595959; white-space: nowrap; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .footer { text-align: center; color: #bfbfbf; font-size: 11px; margin-top: 32px; padding-top: 12px; border-top: 1px solid #e8e8e8; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>员工薪酬档案 · 离职交接附件</h1>
+  <p>生成时间：${now}</p>
+</div>
+
+<div class="info-grid">
+  <div class="info-item"><span class="info-label">姓　名：</span><span class="info-value">${a.employeeName}</span></div>
+  <div class="info-item"><span class="info-label">部　门：</span><span class="info-value">${a.departmentName}</span></div>
+  <div class="info-item"><span class="info-label">职　位：</span><span class="info-value">${a.position}</span></div>
+  <div class="info-item"><span class="info-label">当前月薪：</span><span class="info-value">${formatMoney(a.baseSalary)}</span></div>
+  <div class="info-item"><span class="info-label">绩效等级：</span><span class="info-value">${a.summary.currentLevel}（${a.summary.currentCoefficient}x）</span></div>
+  <div class="info-item"><span class="info-label">累计调薪：</span><span class="info-value">${a.summary.totalSalaryAdjustments}次 / ${formatMoney(a.summary.totalAdjustmentAmount)}</span></div>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card sc-salary">
+    <div class="label">累计调薪次数</div>
+    <div class="value">${a.summary.totalSalaryAdjustments} 次</div>
+    <div class="sub">累计 ${formatMoney(a.summary.totalAdjustmentAmount)}</div>
+  </div>
+  <div class="summary-card sc-bonus">
+    <div class="label">累计奖金发放</div>
+    <div class="value">${a.summary.totalBonusPayments} 笔</div>
+    <div class="sub">税后 ${formatMoney(a.summary.totalBonusNet)}</div>
+  </div>
+  <div class="summary-card sc-perf">
+    <div class="label">绩效评级记录</div>
+    <div class="value">${a.summary.performanceRecords} 次</div>
+    <div class="sub">当前等级 ${a.summary.currentLevel}</div>
+  </div>
+  <div class="summary-card sc-total">
+    <div class="label">历史总事件数</div>
+    <div class="value">${events.length} 条</div>
+    <div class="sub">筛选后记录</div>
+  </div>
+</div>
+
+<h2>薪酬档案时间轴</h2>
+<table>
+  <thead>
+    <tr><th>日期</th><th>类型</th><th>标题</th><th>详情</th><th>金额</th><th>状态</th></tr>
+  </thead>
+  <tbody>${timelineRows || '<tr><td colspan="6" style="text-align:center;color:#bfbfbf">暂无记录</td></tr>'}</tbody>
+</table>
+
+<h2>调薪记录明细</h2>
+<table>
+  <thead>
+    <tr><th>生效日期</th><th>事由分类</th><th>具体事由</th><th>调整前</th><th>调整后</th><th>调整金额</th><th>调整比例</th><th>申请人</th><th>批准人</th></tr>
+  </thead>
+  <tbody>${salaryRows || '<tr><td colspan="9" style="text-align:center;color:#bfbfbf">暂无记录</td></tr>'}</tbody>
+</table>
+
+<h2>奖金发放明细</h2>
+<table>
+  <thead>
+    <tr><th>发放日期</th><th>奖金类型</th><th>奖金名称</th><th>税前金额</th><th>扣税金额</th><th>税后实发</th><th>计税方式</th><th>状态</th></tr>
+  </thead>
+  <tbody>${bonusRows || '<tr><td colspan="8" style="text-align:center;color:#bfbfbf">暂无记录</td></tr>'}</tbody>
+</table>
+
+<h2>绩效评级明细</h2>
+<table>
+  <thead>
+    <tr><th>考核年度</th><th>考核周期</th><th>绩效等级</th><th>绩效系数</th><th>评定人</th><th>评定日期</th><th>评语</th></tr>
+  </thead>
+  <tbody>${perfRows || '<tr><td colspan="7" style="text-align:center;color:#bfbfbf">暂无记录</td></tr>'}</tbody>
+</table>
+
+<div class="footer">
+  本文档由「年终奖模拟器」系统自动生成，作为员工离职交接附件使用 · ${now}
+</div>
+
+</body>
+</html>`
 }
 
 function handleExport() {
@@ -446,35 +761,24 @@ function handleExport() {
     return
   }
 
-  const exportData = {
-    documentType: '员工薪酬档案-离职交接附件',
-    generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-    employeeInfo: {
-      name: archive.value.employeeName,
-      department: archive.value.departmentName,
-      position: archive.value.position,
-      currentBaseSalary: archive.value.baseSalary,
-      currentPerformanceLevel: archive.value.summary.currentLevel,
-      currentPerformanceCoefficient: archive.value.summary.currentCoefficient
-    },
-    summary: archive.value.summary,
-    salaryAdjustmentHistory: archive.value.salaryHistory,
-    bonusPaymentHistory: archive.value.bonusHistory,
-    performanceReviewHistory: archive.value.performanceHistory,
-    timelineEvents: archive.value.events
+  const html = buildHtmlDocument()
+  const printWindow = window.open('', '_blank')
+  if (!printWindow) {
+    message.error('无法打开打印窗口，请检查浏览器弹窗拦截设置')
+    return
   }
 
-  const json = JSON.stringify(exportData, null, 2)
-  const blob = new Blob([json], { type: 'application/json;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${archive.value.employeeName}_薪酬档案_离职交接附件_${dayjs().format('YYYYMMDD')}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  message.success('薪酬档案已导出')
+  printWindow.document.write(html)
+  printWindow.document.close()
+
+  printWindow.onload = () => {
+    printWindow.document.title = `${archive.value!.employeeName}_薪酬档案_${dayjs().format('YYYYMMDD')}`
+    setTimeout(() => {
+      printWindow.print()
+    }, 300)
+  }
+
+  message.info('已打开打印预览，可另存为 PDF 文件')
 }
 </script>
 
