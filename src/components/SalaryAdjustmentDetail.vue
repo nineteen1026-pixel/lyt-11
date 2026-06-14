@@ -128,6 +128,30 @@
               </div>
             </div>
             <div v-else-if="record.status === 'current'" style="font-size: 12px; margin-top: 4px">
+              <div v-if="record.delegateReject" class="delegate-reject-block">
+                <div class="delegate-reject-header">
+                  <n-tag size="small" type="error" style="margin-right: 4px">
+                    <template #icon><CloseOutlined /></template>
+                    代审驳回
+                  </n-tag>
+                  <n-tag size="small" type="info">
+                    <template #icon><RollbackOutlined /></template>
+                    自动回到原审批人
+                  </n-tag>
+                </div>
+                <div style="margin-top: 6px">
+                  <n-text depth="2" style="font-size: 12px">
+                    代审人「{{ record.delegateReject.delegateName }}」代「{{ record.delegateReject.delegatorName }}」驳回，已交回原审批人重新审批
+                  </n-text>
+                </div>
+                <div v-if="record.delegateReject.comment" style="color: #8c8c8c; margin-top: 4px">
+                  <n-text strong>驳回意见：</n-text>{{ record.delegateReject.comment }}
+                </div>
+                <div style="color: #8c8c8c; margin-top: 2px">
+                  <n-text strong>代审驳回时间：</n-text>{{ formatDateTime(record.delegateReject.rejectedAt) }}
+                </div>
+                <n-divider style="margin: 8px 0" />
+              </div>
               <n-tag type="info" size="small" style="margin-right: 4px">当前审批节点</n-tag>
               <n-tag
                 v-if="getNodeDelegationCount(record.nodeId) > 0"
@@ -316,5 +340,18 @@ function handleAction(type: string) {
 }
 .salary-increase {
   color: #52c41a;
+}
+.delegate-reject-block {
+  background: #fff2e8;
+  border: 1px dashed #ffbb96;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.delegate-reject-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 </style>

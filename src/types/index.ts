@@ -205,6 +205,13 @@ export interface DelegationInfo {
   isDelegated: boolean
 }
 
+export interface DelegateRejectRecord {
+  delegateName: string
+  delegatorName: string
+  comment: string
+  rejectedAt: string
+}
+
 export interface ApprovalRecord {
   nodeId: string
   nodeName: string
@@ -213,6 +220,7 @@ export interface ApprovalRecord {
   comment?: string
   operatedAt: string
   delegationInfo?: DelegationInfo
+  delegateReject?: DelegateRejectRecord
 }
 
 export interface SalaryAdjustmentRequest {

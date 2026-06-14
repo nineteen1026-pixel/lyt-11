@@ -726,6 +726,45 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     return { ok: true, message: `已驳回申请${isDelegated ? '（代审）' : ''}` }
   }
 
+  function delegateRejectCurrentNode(
+    id: string,
+    delegateName: string,
+    delegatorName: string,
+    comment: string
+  ): { ok: boolean; message: string } {
+    const idx = requests.value.findIndex((r) => r.id === id)
+    if (idx === -1) return { ok: false, message: '申请单不存在' }
+    const req = requests.value[idx]
+    if (req.status !== 'pending') return { ok: false, message: '当前状态不可审批' }
+    const nodeIdx = req.currentNodeIndex
+    if (nodeIdx < 0 || nodeIdx >= req.approvalRecords.length) return { ok: false, message: '审批节点异常' }
+
+    const records = [...req.approvalRecords]
+    records[nodeIdx] = {
+      ...records[nodeIdx],
+      status: 'current',
+      approverName: '',
+      comment: '',
+      operatedAt: '',
+      delegationInfo: undefined,
+      delegateReject: {
+        delegateName,
+        delegatorName,
+        comment,
+        rejectedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      }
+    }
+
+    requests.value[idx] = {
+      ...req,
+      approvalRecords: records,
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+
+    const nodeName = records[nodeIdx].nodeName
+    return { ok: true, message: `代审驳回，已将「${nodeName}」交回原审批人重新审批` }
+  }
+
   function returnToApplicant(
     id: string,
     approverName: string,
@@ -1181,6 +1220,7 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     submitRequest,
     approveCurrentNode,
     rejectCurrentNode,
+    delegateRejectCurrentNode,
     returnToApplicant,
     rollbackToOriginalNode,
     withdrawRequest,

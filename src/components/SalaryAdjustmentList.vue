@@ -399,13 +399,22 @@ async function handleApprovalSubmit() {
         delegatorName
       )
     } else if (approvalActionType.value === 'reject') {
-      res = store.rejectCurrentNode(
-        approvalActionId.value,
-        approvalForm.approverName,
-        approvalForm.comment,
-        isDelegated,
-        delegatorName
-      )
+      if (isDelegated && delegatorName) {
+        res = store.delegateRejectCurrentNode(
+          approvalActionId.value,
+          approvalForm.approverName,
+          delegatorName,
+          approvalForm.comment
+        )
+      } else {
+        res = store.rejectCurrentNode(
+          approvalActionId.value,
+          approvalForm.approverName,
+          approvalForm.comment,
+          false,
+          undefined
+        )
+      }
     } else {
       res = store.returnToApplicant(
         approvalActionId.value,
