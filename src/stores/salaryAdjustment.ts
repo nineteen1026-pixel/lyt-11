@@ -17,7 +17,9 @@ import type {
   BonusPaymentRecord,
   EmployeeCompensationArchive,
   ArchiveTimelineEvent,
-  ArchiveEventType
+  ArchiveEventType,
+  ApprovalDelegation,
+  DelegationInfo
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -363,6 +365,77 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     approvalWorkflow.value = sorted
   }
 
+  function addDelegation(
+    nodeId: string,
+    data: Omit<ApprovalDelegation, 'id' | 'nodeId' | 'createdAt'>
+  ) {
+    const node = approvalWorkflow.value.find((n) => n.id === nodeId)
+    if (!node) return
+    if (!node.delegations) {
+      node.delegations = []
+    }
+    node.delegations.push({
+      ...data,
+      id: generateId(),
+      nodeId,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+    })
+  }
+
+  function updateDelegation(
+    nodeId: string,
+    delegationId: string,
+    updates: Partial<ApprovalDelegation>
+  ) {
+    const node = approvalWorkflow.value.find((n) => n.id === nodeId)
+    if (!node || !node.delegations) return
+    const idx = node.delegations.findIndex((d) => d.id === delegationId)
+    if (idx === -1) return
+    node.delegations[idx] = { ...node.delegations[idx], ...updates }
+  }
+
+  function deleteDelegation(nodeId: string, delegationId: string) {
+    const node = approvalWorkflow.value.find((n) => n.id === nodeId)
+    if (!node || !node.delegations) return
+    node.delegations = node.delegations.filter((d) => d.id !== delegationId)
+  }
+
+  function getActiveDelegation(
+    nodeId: string,
+    approverName: string
+  ): ApprovalDelegation | null {
+    const node = approvalWorkflow.value.find((n) => n.id === nodeId)
+    if (!node || !node.delegations) return null
+    const now = dayjs()
+    return (
+      node.delegations.find(
+        (d) =>
+          d.enabled &&
+          d.delegatorName === approverName &&
+          !now.isAfter(d.endDate) &&
+          !now.isBefore(d.startDate)
+      ) || null
+    )
+  }
+
+  function getValidDelegationForApprover(
+    nodeId: string,
+    delegateName: string
+  ): ApprovalDelegation | null {
+    const node = approvalWorkflow.value.find((n) => n.id === nodeId)
+    if (!node || !node.delegations) return null
+    const now = dayjs()
+    return (
+      node.delegations.find(
+        (d) =>
+          d.enabled &&
+          d.delegateName === delegateName &&
+          !now.isAfter(d.endDate) &&
+          !now.isBefore(d.startDate)
+      ) || null
+    )
+  }
+
   function calculateApplicableNodes(adjustmentAmount: number): ApprovalNode[] {
     return sortedWorkflow.value.filter((node) => {
       const aboveMin = node.minApprovalAmount === undefined || adjustmentAmount >= node.minApprovalAmount
@@ -535,7 +608,13 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     }
   }
 
-  function approveCurrentNode(id: string, approverName: string, comment: string): { ok: boolean; message: string } {
+  function approveCurrentNode(
+    id: string,
+    approverName: string,
+    comment: string,
+    isDelegated: boolean = false,
+    delegatorName?: string
+  ): { ok: boolean; message: string } {
     const idx = requests.value.findIndex((r) => r.id === id)
     if (idx === -1) return { ok: false, message: '申请单不存在' }
     const req = requests.value[idx]
@@ -543,13 +622,23 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     const nodeIdx = req.currentNodeIndex
     if (nodeIdx < 0 || nodeIdx >= req.approvalRecords.length) return { ok: false, message: '审批节点异常' }
 
+    let delegationInfo: DelegationInfo | undefined
+    if (isDelegated && delegatorName) {
+      delegationInfo = {
+        delegatorName,
+        delegateName: approverName,
+        isDelegated: true
+      }
+    }
+
     const records = [...req.approvalRecords]
     records[nodeIdx] = {
       ...records[nodeIdx],
       status: 'approved',
       approverName,
       comment,
-      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      delegationInfo
     }
 
     const nextIdx = nodeIdx + 1
@@ -559,9 +648,13 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         ...req,
         approvalRecords: records,
         currentNodeIndex: nextIdx,
-        updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+        updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        rejectedFromNodeIndex: undefined
       }
-      return { ok: true, message: `已通过，进入下一节点：${records[nextIdx].nodeName}` }
+      return {
+        ok: true,
+        message: `已通过${isDelegated ? '（代审）' : ''}，进入下一节点：${records[nextIdx].nodeName}`
+      }
     } else {
       const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
       pendingToUsedBudget(req.departmentId, req.adjustmentAmount * 12)
@@ -582,13 +675,20 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         approvalRecords: records,
         currentNodeIndex: -1,
         approvedAt: now,
-        updatedAt: now
+        updatedAt: now,
+        rejectedFromNodeIndex: undefined
       }
-      return { ok: true, message: '审批全部通过，调薪已生效' }
+      return { ok: true, message: `审批全部通过${isDelegated ? '（代审）' : ''}，调薪已生效` }
     }
   }
 
-  function rejectCurrentNode(id: string, approverName: string, comment: string): { ok: boolean; message: string } {
+  function rejectCurrentNode(
+    id: string,
+    approverName: string,
+    comment: string,
+    isDelegated: boolean = false,
+    delegatorName?: string
+  ): { ok: boolean; message: string } {
     const idx = requests.value.findIndex((r) => r.id === id)
     if (idx === -1) return { ok: false, message: '申请单不存在' }
     const req = requests.value[idx]
@@ -596,13 +696,23 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     const nodeIdx = req.currentNodeIndex
     if (nodeIdx < 0 || nodeIdx >= req.approvalRecords.length) return { ok: false, message: '审批节点异常' }
 
+    let delegationInfo: DelegationInfo | undefined
+    if (isDelegated && delegatorName) {
+      delegationInfo = {
+        delegatorName,
+        delegateName: approverName,
+        isDelegated: true
+      }
+    }
+
     const records = [...req.approvalRecords]
     records[nodeIdx] = {
       ...records[nodeIdx],
       status: 'rejected',
       approverName,
       comment,
-      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      delegationInfo
     }
     releasePendingBudget(req.departmentId, req.adjustmentAmount * 12)
     requests.value[idx] = {
@@ -610,25 +720,42 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       status: 'rejected',
       approvalRecords: records,
       rejectedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      rejectedFromNodeIndex: nodeIdx
     }
-    return { ok: true, message: '已驳回申请' }
+    return { ok: true, message: `已驳回申请${isDelegated ? '（代审）' : ''}` }
   }
 
-  function returnToApplicant(id: string, approverName: string, comment: string): { ok: boolean; message: string } {
+  function returnToApplicant(
+    id: string,
+    approverName: string,
+    comment: string,
+    isDelegated: boolean = false,
+    delegatorName?: string
+  ): { ok: boolean; message: string } {
     const idx = requests.value.findIndex((r) => r.id === id)
     if (idx === -1) return { ok: false, message: '申请单不存在' }
     const req = requests.value[idx]
     if (req.status !== 'pending') return { ok: false, message: '当前状态不可退回' }
     const nodeIdx = req.currentNodeIndex
 
+    let delegationInfo: DelegationInfo | undefined
+    if (isDelegated && delegatorName) {
+      delegationInfo = {
+        delegatorName,
+        delegateName: approverName,
+        isDelegated: true
+      }
+    }
+
     const records = [...req.approvalRecords]
     records[nodeIdx] = {
       ...records[nodeIdx],
       status: 'waiting',
       approverName: '',
-      comment: `退回修改：${comment}（由 ${approverName} 退回）`,
-      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      comment: `退回修改：${comment}（由 ${approverName}${isDelegated ? ' 代审' : ''} 退回）`,
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      delegationInfo
     }
     for (let i = 0; i < records.length; i++) {
       records[i] = { ...records[i], status: 'waiting', approverName: '' }
@@ -641,7 +768,54 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       currentNodeIndex: -1,
       updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
-    return { ok: true, message: '已退回申请人修改' }
+    return { ok: true, message: `已退回申请人修改${isDelegated ? '（代审）' : ''}` }
+  }
+
+  function rollbackToOriginalNode(id: string): { ok: boolean; message: string } {
+    const idx = requests.value.findIndex((r) => r.id === id)
+    if (idx === -1) return { ok: false, message: '申请单不存在' }
+    const req = requests.value[idx]
+    if (req.status !== 'rejected') return { ok: false, message: '仅已驳回的申请可回退' }
+    if (req.rejectedFromNodeIndex === undefined || req.rejectedFromNodeIndex < 0) {
+      return { ok: false, message: '未找到驳回来源节点，无法回退' }
+    }
+
+    const targetNodeIndex = req.rejectedFromNodeIndex
+    const records = [...req.approvalRecords]
+
+    records[targetNodeIndex] = {
+      ...records[targetNodeIndex],
+      status: 'current',
+      approverName: '',
+      operatedAt: ''
+    }
+
+    for (let i = targetNodeIndex + 1; i < records.length; i++) {
+      records[i] = {
+        ...records[i],
+        status: 'waiting',
+        approverName: '',
+        operatedAt: ''
+      }
+    }
+
+    const budgetCheck = checkBudgetAvailability(req.departmentId, req.adjustmentAmount * 12)
+    if (!budgetCheck.ok) return budgetCheck
+
+    allocateBudget(req.departmentId, req.adjustmentAmount * 12, 'pending')
+
+    requests.value[idx] = {
+      ...req,
+      status: 'pending',
+      approvalRecords: records,
+      currentNodeIndex: targetNodeIndex,
+      rejectedAt: undefined,
+      rejectedFromNodeIndex: undefined,
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+
+    const targetNodeName = records[targetNodeIndex].nodeName
+    return { ok: true, message: `已回退至原审批节点：${targetNodeName}` }
   }
 
   function withdrawRequest(id: string): { ok: boolean; message: string } {
@@ -995,6 +1169,11 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     updateApprovalNode,
     removeApprovalNode,
     moveApprovalNode,
+    addDelegation,
+    updateDelegation,
+    deleteDelegation,
+    getActiveDelegation,
+    getValidDelegationForApprover,
     calculateApplicableNodes,
     checkBudgetAvailability,
     createDraftRequest,
@@ -1003,6 +1182,7 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     approveCurrentNode,
     rejectCurrentNode,
     returnToApplicant,
+    rollbackToOriginalNode,
     withdrawRequest,
     deleteRequest,
     getEmployeeHistory,

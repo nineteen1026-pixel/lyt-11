@@ -54,6 +54,23 @@
                   <template #icon><EditOutlined /></template>
                   编辑
                 </n-button>
+                <n-button
+                  size="small"
+                  type="warning"
+                  quaternary
+                  @click="openDelegationModal(node)"
+                >
+                  <template #icon><UserSwitchOutlined /></template>
+                  委托代办
+                  <n-tag
+                    v-if="getActiveDelegationCount(node) > 0"
+                    size="small"
+                    type="warning"
+                    style="margin-left: 4px"
+                  >
+                    {{ getActiveDelegationCount(node) }}
+                  </n-tag>
+                </n-button>
                 <n-popconfirm @positive-click="handleDelete(node.id)">
                   <template #trigger>
                     <n-button size="small" type="error" quaternary>
@@ -129,11 +146,86 @@
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal v-model:show="showDelegationModal" preset="card" style="width: 720px" title="委托代办配置" :mask-closable="false">
+      <n-space vertical :size="16" style="width: 100%">
+        <n-alert type="info" :bordered="false">
+          <template #icon>
+            <n-icon><InfoCircleOutlined /></n-icon>
+          </template>
+          为「{{ currentDelegationNode?.name }}」配置委托代办，授权人可指定代审人在有效期内代为审批。
+        </n-alert>
+
+        <n-space justify="space-between" align="center" style="width: 100%">
+          <n-text strong>委托列表</n-text>
+          <n-button type="primary" size="small" @click="showAddDelegation = true">
+            <template #icon><PlusOutlined /></template>
+            新增委托
+          </n-button>
+        </n-space>
+
+        <div v-if="currentDelegationList.length === 0" class="delegation-empty">
+          <n-empty description="暂无委托配置" />
+        </div>
+
+        <n-data-table
+          v-else
+          :columns="delegationColumns"
+          :data="currentDelegationList"
+          :pagination="false"
+          :bordered="false"
+          size="small"
+        />
+
+        <n-modal v-model:show="showAddDelegation" preset="card" style="width: 500px" :title="editingDelegation ? '编辑委托' : '新增委托'" :mask-closable="false">
+          <n-form ref="delegationFormRef" :model="delegationForm" :rules="delegationRules" label-placement="left" label-width="100px">
+            <n-form-item label="授权人" path="delegatorName">
+              <n-input v-model:value="delegationForm.delegatorName" placeholder="请输入授权人姓名" />
+            </n-form-item>
+            <n-form-item label="代审人" path="delegateName">
+              <n-input v-model:value="delegationForm.delegateName" placeholder="请输入代审人姓名" />
+            </n-form-item>
+            <n-form-item label="有效期开始" path="startDate">
+              <n-date-picker
+                v-model:value="delegationForm.startDate"
+                type="date"
+                style="width: 100%"
+                placeholder="请选择开始日期"
+                value-format="YYYY-MM-DD"
+              />
+            </n-form-item>
+            <n-form-item label="有效期结束" path="endDate">
+              <n-date-picker
+                v-model:value="delegationForm.endDate"
+                type="date"
+                style="width: 100%"
+                placeholder="请选择结束日期"
+                value-format="YYYY-MM-DD"
+              />
+            </n-form-item>
+            <n-form-item label="启用">
+              <n-switch v-model:value="delegationForm.enabled" />
+            </n-form-item>
+          </n-form>
+          <template #footer>
+            <n-space justify="end">
+              <n-button @click="showAddDelegation = false; editingDelegation = null">取消</n-button>
+              <n-button type="primary" @click="handleSaveDelegation">确定</n-button>
+            </n-space>
+          </template>
+        </n-modal>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showDelegationModal = false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </n-space>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, h } from 'vue'
 import { useMessage, type FormInst, type FormRules } from 'naive-ui'
 import {
   PlusOutlined,
@@ -141,10 +233,12 @@ import {
   ArrowDownOutlined,
   EditOutlined,
   DeleteOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  UserSwitchOutlined
 } from '@vicons/antd'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
-import type { ApprovalNode, ApprovalNodeType } from '@/types'
+import type { ApprovalNode, ApprovalNodeType, ApprovalDelegation } from '@/types'
+import dayjs from 'dayjs'
 
 const store = useSalaryAdjustmentStore()
 const message = useMessage()
@@ -178,7 +272,179 @@ const rules: FormRules = {
   order: { required: true, message: '请输入审批顺序', trigger: 'blur', type: 'number', min: 1 }
 }
 
+const showDelegationModal = ref(false)
+const showAddDelegation = ref(false)
+const currentDelegationNode = ref<ApprovalNode | null>(null)
+const editingDelegation = ref<ApprovalDelegation | null>(null)
+const delegationFormRef = ref<FormInst | null>(null)
+
+const delegationForm = reactive({
+  delegatorName: '',
+  delegateName: '',
+  startDate: null as string | null,
+  endDate: null as string | null,
+  enabled: true
+})
+
+const delegationRules: FormRules = {
+  delegatorName: { required: true, message: '请输入授权人姓名', trigger: 'blur' },
+  delegateName: { required: true, message: '请输入代审人姓名', trigger: 'blur' },
+  startDate: { required: true, message: '请选择开始日期', trigger: 'change' },
+  endDate: { required: true, message: '请选择结束日期', trigger: 'change' }
+}
+
 const sortedWorkflow = computed(() => store.sortedWorkflow)
+
+const currentDelegationList = computed(() => {
+  return currentDelegationNode.value?.delegations || []
+})
+
+const delegationColumns = [
+  {
+    title: '授权人',
+    key: 'delegatorName',
+    width: 120
+  },
+  {
+    title: '代审人',
+    key: 'delegateName',
+    width: 120
+  },
+  {
+    title: '有效期',
+    key: 'validity',
+    width: 240,
+    render: (row: ApprovalDelegation) => {
+      const isExpired = dayjs().isAfter(row.endDate)
+      const isNotStarted = dayjs().isBefore(row.startDate)
+      let statusText = ''
+      let statusType = 'default' as any
+      if (isExpired) {
+        statusText = '已过期'
+        statusType = 'default'
+      } else if (isNotStarted) {
+        statusText = '未生效'
+        statusType = 'info'
+      } else {
+        statusText = '有效中'
+        statusType = 'success'
+      }
+      return h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        [
+          h('span', {}, `${row.startDate} ~ ${row.endDate}`),
+          h('n-tag', { size: 'small', type: row.enabled ? statusType : 'default' }, {
+            default: () => row.enabled ? statusText : '已停用'
+          })
+        ]
+      )
+    }
+  },
+  {
+    title: '状态',
+    key: 'enabled',
+    width: 100,
+    render: (row: ApprovalDelegation) =>
+      h('n-tag', { size: 'small', type: row.enabled ? 'success' : 'default' }, {
+        default: () => row.enabled ? '启用' : '停用'
+      })
+  },
+  {
+    title: '操作',
+    key: 'action',
+    width: 160,
+    render: (row: ApprovalDelegation) =>
+      h('n-space', { size: 'small' }, {
+        default: () => [
+          h('n-button', {
+            size: 'small',
+            type: 'primary',
+            quaternary: true,
+            onClick: () => handleEditDelegation(row)
+          }, { default: () => '编辑' }),
+          h('n-popconfirm', {
+            onPositiveClick: () => handleDeleteDelegation(row.id)
+          }, {
+            default: () => h('n-button', {
+              size: 'small',
+              type: 'error',
+              quaternary: true
+            }, { default: () => '删除' }),
+            trigger: () => '确定删除此委托配置吗？'
+          })
+        ]
+      })
+  }
+]
+
+function getActiveDelegationCount(node: ApprovalNode): number {
+  const now = dayjs()
+  return (node.delegations || []).filter(
+    (d) => d.enabled && !now.isAfter(d.endDate) && !now.isBefore(d.startDate)
+  ).length
+}
+
+function openDelegationModal(node: ApprovalNode) {
+  currentDelegationNode.value = node
+  showDelegationModal.value = true
+}
+
+function handleEditDelegation(delegation: ApprovalDelegation) {
+  editingDelegation.value = delegation
+  Object.assign(delegationForm, {
+    delegatorName: delegation.delegatorName,
+    delegateName: delegation.delegateName,
+    startDate: delegation.startDate,
+    endDate: delegation.endDate,
+    enabled: delegation.enabled
+  })
+  showAddDelegation.value = true
+}
+
+function handleDeleteDelegation(id: string) {
+  if (!currentDelegationNode.value) return
+  store.deleteDelegation(currentDelegationNode.value.id, id)
+  message.success('删除成功')
+}
+
+async function handleSaveDelegation() {
+  try {
+    await delegationFormRef.value?.validate()
+    if (delegationForm.startDate && delegationForm.endDate) {
+      if (dayjs(delegationForm.startDate).isAfter(delegationForm.endDate)) {
+        message.error('开始日期不能晚于结束日期')
+        return
+      }
+    }
+    if (!currentDelegationNode.value) return
+    const data = {
+      delegatorName: delegationForm.delegatorName,
+      delegateName: delegationForm.delegateName,
+      startDate: delegationForm.startDate!,
+      endDate: delegationForm.endDate!,
+      enabled: delegationForm.enabled
+    }
+    if (editingDelegation.value) {
+      store.updateDelegation(currentDelegationNode.value.id, editingDelegation.value.id, data)
+      message.success('更新成功')
+    } else {
+      store.addDelegation(currentDelegationNode.value.id, data)
+      message.success('添加成功')
+    }
+    showAddDelegation.value = false
+    editingDelegation.value = null
+    Object.assign(delegationForm, {
+      delegatorName: '',
+      delegateName: '',
+      startDate: null,
+      endDate: null,
+      enabled: true
+    })
+  } catch {
+    // validation failed
+  }
+}
 
 function getNodeDescription(node: ApprovalNode): string {
   const parts: string[] = []
@@ -253,5 +519,8 @@ async function handleSave() {
 <style scoped>
 .node-actions {
   padding-top: 8px;
+}
+.delegation-empty {
+  padding: 24px 0;
 }
 </style>

@@ -173,6 +173,17 @@ export interface AdjustmentReason {
 
 export type ApprovalNodeType = 'direct_manager' | 'department_head' | 'hr' | 'finance' | 'ceo' | 'custom'
 
+export interface ApprovalDelegation {
+  id: string
+  nodeId: string
+  delegatorName: string
+  delegateName: string
+  startDate: string
+  endDate: string
+  enabled: boolean
+  createdAt: string
+}
+
 export interface ApprovalNode {
   id: string
   name: string
@@ -182,10 +193,17 @@ export interface ApprovalNode {
   minApprovalAmount?: number
   maxApprovalAmount?: number
   required: boolean
+  delegations?: ApprovalDelegation[]
 }
 
 export type ApprovalStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'returned' | 'withdrawn'
 export type NodeApprovalStatus = 'waiting' | 'approved' | 'rejected' | 'skipped' | 'current'
+
+export interface DelegationInfo {
+  delegatorName: string
+  delegateName: string
+  isDelegated: boolean
+}
 
 export interface ApprovalRecord {
   nodeId: string
@@ -194,6 +212,7 @@ export interface ApprovalRecord {
   status: NodeApprovalStatus
   comment?: string
   operatedAt: string
+  delegationInfo?: DelegationInfo
 }
 
 export interface SalaryAdjustmentRequest {
@@ -226,6 +245,7 @@ export interface SalaryAdjustmentRequest {
   budgetYear: number
   isHistorical?: boolean
   historicalApprovedAt?: string
+  rejectedFromNodeIndex?: number
 }
 
 export interface DepartmentSalaryBudget {

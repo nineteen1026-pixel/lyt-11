@@ -101,12 +101,42 @@
         >
           <template #description>
             <div v-if="record.status !== 'waiting' && record.status !== 'current'" style="font-size: 12px; margin-top: 4px">
-              <div>审批人：{{ record.approverName || '-' }}</div>
-              <div v-if="record.comment" style="color: #8c8c8c">意见：{{ record.comment }}</div>
-              <div style="color: #8c8c8c">时间：{{ formatDateTime(record.operatedAt) }}</div>
+              <div v-if="record.delegationInfo?.isDelegated" style="margin-bottom: 4px">
+                <n-tag size="small" type="warning" style="margin-right: 4px">
+                  <template #icon><UserSwitchOutlined /></template>
+                  代审
+                </n-tag>
+                <n-text depth="3">
+                  原审批人：{{ record.delegationInfo.delegatorName }} → 代审人：{{ record.delegationInfo.delegateName }}
+                </n-text>
+              </div>
+              <div>
+                <n-text strong>审批人：</n-text>
+                <n-tag
+                  size="small"
+                  :type="record.delegationInfo?.isDelegated ? 'warning' : 'default'"
+                >
+                  {{ record.approverName || '-' }}
+                  <span v-if="record.delegationInfo?.isDelegated" style="margin-left: 4px; font-size: 10px">（代审）</span>
+                </n-tag>
+              </div>
+              <div v-if="record.comment" style="color: #8c8c8c; margin-top: 2px">
+                <n-text strong>意见：</n-text>{{ record.comment }}
+              </div>
+              <div style="color: #8c8c8c; margin-top: 2px">
+                <n-text strong>时间：</n-text>{{ formatDateTime(record.operatedAt) }}
+              </div>
             </div>
             <div v-else-if="record.status === 'current'" style="font-size: 12px; margin-top: 4px">
-              <n-tag type="info" size="small">当前审批节点</n-tag>
+              <n-tag type="info" size="small" style="margin-right: 4px">当前审批节点</n-tag>
+              <n-tag
+                v-if="getNodeDelegationCount(record.nodeId) > 0"
+                type="warning"
+                size="small"
+              >
+                <template #icon><UserSwitchOutlined /></template>
+                待委托 {{ getNodeDelegationCount(record.nodeId) }} 人
+              </n-tag>
             </div>
           </template>
         </n-step>
@@ -132,6 +162,12 @@
         <div v-else>
           <p>此调薪申请已被驳回。</p>
           <p v-if="request.rejectedAt">驳回时间：{{ formatDateTime(request.rejectedAt) }}</p>
+          <div v-if="request.rejectedFromNodeIndex !== undefined && request.rejectedFromNodeIndex >= 0" style="margin-top: 12px">
+            <n-tag type="info" size="small" style="margin-right: 8px">
+              <template #icon><RollbackOutlined /></template>
+              驳回来源：{{ request.approvalRecords[request.rejectedFromNodeIndex]?.nodeName }}
+            </n-tag>
+          </div>
         </div>
       </n-alert>
     </n-card>
@@ -158,6 +194,10 @@
           <template #icon><RollbackOutlined /></template>
           退回修改
         </n-button>
+        <n-button v-if="canRollback" type="warning" @click="handleAction('rollback')">
+          <template #icon><RollbackOutlined /></template>
+          回退至原审批节点
+        </n-button>
         <n-button v-if="canWithdraw" @click="handleAction('withdraw')">
           <template #icon><UndoOutlined /></template>
           撤回申请
@@ -182,10 +222,12 @@ import {
   CloseOutlined,
   RollbackOutlined,
   UndoOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  UserSwitchOutlined
 } from '@vicons/antd'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import type { SalaryAdjustmentRequest, NodeApprovalStatus, AdjustmentReasonCategory } from '@/types'
+import dayjs from 'dayjs'
 
 const props = defineProps<{
   request: SalaryAdjustmentRequest
@@ -217,6 +259,7 @@ const canEdit = computed(() => props.request.status === 'draft' || props.request
 const canSubmit = computed(() => props.request.status === 'draft' || props.request.status === 'returned')
 const canApprove = computed(() => props.request.status === 'pending')
 const canReturn = computed(() => props.request.status === 'pending')
+const canRollback = computed(() => props.request.status === 'rejected' && props.request.rejectedFromNodeIndex !== undefined)
 const canWithdraw = computed(() => props.request.status === 'pending')
 const canDelete = computed(() => props.request.status !== 'approved')
 
@@ -238,6 +281,15 @@ function getStepStatus(status: NodeApprovalStatus): 'wait' | 'process' | 'finish
     skipped: 'finish'
   }
   return map[status] || 'wait'
+}
+
+function getNodeDelegationCount(nodeId: string): number {
+  const node = store.sortedWorkflow.find((n) => n.id === nodeId)
+  if (!node || !node.delegations) return 0
+  const now = dayjs()
+  return node.delegations.filter(
+    (d) => d.enabled && !now.isAfter(d.endDate) && !now.isBefore(d.startDate)
+  ).length
 }
 
 function handleAction(type: string) {

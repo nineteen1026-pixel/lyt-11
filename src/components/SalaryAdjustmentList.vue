@@ -131,12 +131,30 @@
     </n-modal>
 
     <n-modal v-model:show="showApproval" preset="card" style="width: 520px" :title="approvalActionTitle" :mask-closable="false">
+      <n-alert v-if="detectedDelegation" type="warning" :bordered="false" style="margin-bottom: 16px">
+        <template #icon>
+          <n-icon><UserSwitchOutlined /></n-icon>
+        </template>
+        <n-space vertical :size="4">
+          <n-text strong>检测到有效的委托代办</n-text>
+          <n-text depth="2" style="font-size: 12px">
+            授权人「{{ detectedDelegation.delegatorName }}」已委托您（{{ detectedDelegation.delegateName }}）在
+            {{ detectedDelegation.startDate }} ~ {{ detectedDelegation.endDate }} 期间代为审批。
+          </n-text>
+        </n-space>
+      </n-alert>
       <n-form ref="approvalFormRef" :model="approvalForm" :rules="approvalRules" label-placement="left" label-width="80px">
         <n-form-item label="审批人" path="approverName">
-          <n-input v-model:value="approvalForm.approverName" placeholder="请输入审批人姓名" />
+          <n-input v-model:value="approvalForm.approverName" placeholder="请输入审批人姓名" @update:value="checkDelegation" />
         </n-form-item>
         <n-form-item label="审批意见" path="comment">
           <n-input v-model:value="approvalForm.comment" type="textarea" :rows="4" placeholder="请输入审批意见" />
+        </n-form-item>
+        <n-form-item v-if="detectedDelegation" label="标记代审">
+          <n-space align="center">
+            <n-switch v-model:value="approvalForm.markAsDelegated" />
+            <n-text depth="2" style="font-size: 12px">标记后将在审批轨迹中显示「代审」标识</n-text>
+          </n-space>
         </n-form-item>
       </n-form>
       <template #footer>
@@ -144,6 +162,7 @@
           <n-button @click="showApproval = false">取消</n-button>
           <n-button :type="approvalActionType === 'approve' ? 'success' : approvalActionType === 'reject' ? 'error' : 'warning'" @click="handleApprovalSubmit">
             确认{{ approvalActionType === 'approve' ? '通过' : approvalActionType === 'reject' ? '驳回' : '退回' }}
+            {{ approvalForm.markAsDelegated ? '（代审）' : '' }}
           </n-button>
         </n-space>
       </template>
@@ -158,13 +177,14 @@ import {
   SearchOutlined,
   PlusOutlined,
   EyeOutlined,
-  MoreOutlined
+  MoreOutlined,
+  UserSwitchOutlined
 } from '@vicons/antd'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import { useBonusStore } from '@/stores/bonus'
 import SalaryAdjustmentForm from './SalaryAdjustmentForm.vue'
 import SalaryAdjustmentDetail from './SalaryAdjustmentDetail.vue'
-import type { SalaryAdjustmentRequest, AdjustmentReasonCategory, ApprovalStatus } from '@/types'
+import type { SalaryAdjustmentRequest, AdjustmentReasonCategory, ApprovalStatus, ApprovalDelegation } from '@/types'
 
 const store = useSalaryAdjustmentStore()
 const bonusStore = useBonusStore()
@@ -185,7 +205,8 @@ const showApproval = ref(false)
 const approvalActionType = ref<'approve' | 'reject' | 'return'>('approve')
 const approvalActionId = ref<string | null>(null)
 const approvalFormRef = ref<FormInst | null>(null)
-const approvalForm = reactive({ approverName: '', comment: '' })
+const approvalForm = reactive({ approverName: '', comment: '', markAsDelegated: false })
+const detectedDelegation = ref<ApprovalDelegation | null>(null)
 const approvalRules: FormRules = {
   approverName: { required: true, message: '请输入审批人姓名', trigger: 'blur' },
   comment: { required: true, message: '请输入审批意见', trigger: 'blur', min: 2 }
@@ -274,6 +295,9 @@ function getActionOptions(row: SalaryAdjustmentRequest): DropdownOption[] {
     opts.push({ label: () => h('span', [h('span', { style: 'margin-right:8px' }, '↩️'), '退回修改']), key: 'return' })
     opts.push({ label: () => h('span', [h('span', { style: 'margin-right:8px' }, '⬅️'), '撤回申请']), key: 'withdraw' })
   }
+  if (row.status === 'rejected' && row.rejectedFromNodeIndex !== undefined) {
+    opts.push({ label: () => h('span', [h('span', { style: 'margin-right:8px' }, '🔄'), '回退至原审批节点']), key: 'rollback' })
+  }
   if (row.status !== 'approved') {
     opts.push({ type: 'divider', key: 'd' })
     opts.push({ label: () => h('span', { style: 'color:#f5222d' }, [h('span', { style: 'margin-right:8px' }, '🗑️'), '删除']), key: 'delete' })
@@ -294,6 +318,9 @@ function handleAction(key: string, row: SalaryAdjustmentRequest) {
     case 'reject':
     case 'return':
       openApproval(key as any, row.id)
+      break
+    case 'rollback':
+      handleRollback(row.id)
       break
     case 'withdraw':
       handleWithdraw(row.id)
@@ -318,6 +345,8 @@ function handleDetailAction(action: { type: string; id: string }) {
     handleSubmit(action.id)
   } else if (action.type === 'approve' || action.type === 'reject' || action.type === 'return') {
     openApproval(action.type as any, action.id)
+  } else if (action.type === 'rollback') {
+    handleRollback(action.id)
   } else if (action.type === 'withdraw') {
     handleWithdraw(action.id)
   } else if (action.type === 'delete') {
@@ -336,7 +365,22 @@ function openApproval(type: 'approve' | 'reject' | 'return', id: string) {
   approvalActionId.value = id
   approvalForm.approverName = ''
   approvalForm.comment = ''
+  approvalForm.markAsDelegated = false
+  detectedDelegation.value = null
   showApproval.value = true
+}
+
+function checkDelegation(approverName: string) {
+  if (!approvalActionId.value) return
+  const req = store.requests.find((r) => r.id === approvalActionId.value)
+  if (!req || req.status !== 'pending') return
+  const currentNode = req.workflowSnapshot[req.currentNodeIndex]
+  if (!currentNode) return
+  const delegation = store.getValidDelegationForApprover(currentNode.id, approverName)
+  detectedDelegation.value = delegation
+  if (delegation) {
+    approvalForm.markAsDelegated = true
+  }
 }
 
 async function handleApprovalSubmit() {
@@ -344,12 +388,32 @@ async function handleApprovalSubmit() {
     await approvalFormRef.value?.validate()
     if (!approvalActionId.value) return
     let res
+    const isDelegated = !!(approvalForm.markAsDelegated && detectedDelegation.value)
+    const delegatorName = isDelegated ? detectedDelegation.value!.delegatorName : undefined
     if (approvalActionType.value === 'approve') {
-      res = store.approveCurrentNode(approvalActionId.value, approvalForm.approverName, approvalForm.comment)
+      res = store.approveCurrentNode(
+        approvalActionId.value,
+        approvalForm.approverName,
+        approvalForm.comment,
+        isDelegated,
+        delegatorName
+      )
     } else if (approvalActionType.value === 'reject') {
-      res = store.rejectCurrentNode(approvalActionId.value, approvalForm.approverName, approvalForm.comment)
+      res = store.rejectCurrentNode(
+        approvalActionId.value,
+        approvalForm.approverName,
+        approvalForm.comment,
+        isDelegated,
+        delegatorName
+      )
     } else {
-      res = store.returnToApplicant(approvalActionId.value, approvalForm.approverName, approvalForm.comment)
+      res = store.returnToApplicant(
+        approvalActionId.value,
+        approvalForm.approverName,
+        approvalForm.comment,
+        isDelegated,
+        delegatorName
+      )
     }
     if (res.ok) {
       message.success(res.message)
@@ -360,6 +424,20 @@ async function handleApprovalSubmit() {
   } catch {
     // validation failed
   }
+}
+
+function handleRollback(id: string) {
+  dialog.warning({
+    title: '确认回退',
+    content: '确定要将此申请回退至原审批节点吗？回退后该节点将重新进入审批流程。',
+    positiveText: '确认回退',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const res = store.rollbackToOriginalNode(id)
+      if (res.ok) message.success(res.message)
+      else message.error(res.message)
+    }
+  })
 }
 
 function handleWithdraw(id: string) {
