@@ -340,25 +340,26 @@ export const useBonusStore = defineStore('bonus', () => {
   }
 
   function calculateWeightedBaseSalary(employee: Employee, year: number): number {
-    const impacts = getEmployeeImpacts(employee.id).filter((i) => {
-      const impactYear = dayjs(i.effectiveDate).year()
-      return impactYear <= year
-    })
-
-    if (impacts.length === 0) {
+    const allImpacts = getEmployeeImpacts(employee.id)
+    if (allImpacts.length === 0) {
       return employee.baseSalary
     }
 
-    const sortedImpacts = [...impacts].sort((a, b) =>
+    const sortedImpacts = [...allImpacts].sort((a, b) =>
       dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
     )
 
     const yearImpacts = sortedImpacts.filter((i) => dayjs(i.effectiveDate).year() === year)
 
-    let salaryAtYearStart = employee.baseSalary
-    for (const imp of sortedImpacts) {
-      if (dayjs(imp.effectiveDate).year() < year) {
-        salaryAtYearStart = imp.newValue
+    let salaryAtYearStart: number
+    if (yearImpacts.length > 0) {
+      salaryAtYearStart = yearImpacts[0].oldValue
+    } else {
+      salaryAtYearStart = employee.baseSalary
+      for (const imp of sortedImpacts) {
+        if (dayjs(imp.effectiveDate).year() < year) {
+          salaryAtYearStart = imp.newValue
+        }
       }
     }
 
