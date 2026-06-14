@@ -342,7 +342,7 @@ export const useBonusStore = defineStore('bonus', () => {
   function calculateWeightedBaseSalary(employee: Employee, year: number): number {
     const impacts = getEmployeeImpacts(employee.id).filter((i) => {
       const impactYear = dayjs(i.effectiveDate).year()
-      return impactYear === year
+      return impactYear <= year
     })
 
     if (impacts.length === 0) {
@@ -353,22 +353,31 @@ export const useBonusStore = defineStore('bonus', () => {
       dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
     )
 
+    const yearImpacts = sortedImpacts.filter((i) => dayjs(i.effectiveDate).year() === year)
+
+    let salaryAtYearStart = employee.baseSalary
+    for (const imp of sortedImpacts) {
+      if (dayjs(imp.effectiveDate).year() < year) {
+        salaryAtYearStart = imp.newValue
+      }
+    }
+
+    if (yearImpacts.length === 0) {
+      return salaryAtYearStart
+    }
+
     let totalWeightedSalary = 0
-    let currentSalary = employee.baseSalary
+    let currentSalary = salaryAtYearStart
     let periodStart = dayjs(`${year}-01-01`)
     const yearEnd = dayjs(`${year}-12-31`)
 
-    for (const impact of sortedImpacts) {
+    for (const impact of yearImpacts) {
       const impactDate = dayjs(impact.effectiveDate)
-      if (impactDate.isBefore(periodStart)) {
-        currentSalary = impact.newValue
-        continue
-      }
       if (impactDate.isAfter(yearEnd)) break
 
-      const daysInPeriod = impactDate.startOf('month').diff(periodStart, 'day')
-      if (daysInPeriod > 0) {
-        totalWeightedSalary += currentSalary * daysInPeriod
+      const daysBeforeImpact = impactDate.startOf('month').diff(periodStart, 'day')
+      if (daysBeforeImpact > 0) {
+        totalWeightedSalary += currentSalary * daysBeforeImpact
       }
       periodStart = impactDate.startOf('month')
       currentSalary = impact.newValue
