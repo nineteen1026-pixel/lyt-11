@@ -363,6 +363,14 @@ export const useBonusStore = defineStore('bonus', () => {
       }
     })
     version.isCurrent = true
+    bonusPool.value = JSON.parse(JSON.stringify(version.snapshot.bonusPool))
+    departments.value = JSON.parse(JSON.stringify(version.snapshot.departments))
+    performanceLevels.value = JSON.parse(JSON.stringify(version.snapshot.performanceLevels))
+    performanceDistributionRatios.value = JSON.parse(JSON.stringify(version.snapshot.performanceDistributionRatios))
+    employeeTags.value = JSON.parse(JSON.stringify(version.snapshot.employeeTags))
+    for (const dept of departments.value) {
+      bonusPool.value.departmentRatios[dept.id] = dept.allocationRatio
+    }
     addApprovalRecord({
       versionId: id,
       action: 'approve',
@@ -523,13 +531,13 @@ export const useBonusStore = defineStore('bonus', () => {
     const targetVersion = getVersionById(versionId)
     if (!targetVersion || targetVersion.status !== 'approved') return false
     const currentVersion = getCurrentVersion()
-    const currentSnapshot = createSnapshot()
+    const effectiveSnapshot: BonusPlanVersionSnapshot = JSON.parse(JSON.stringify(targetVersion.snapshot))
     const rollbackVersion: BonusPlanVersion = {
       id: generateId(),
       versionNo: generateVersionNo(),
       name: `${targetVersion.name}-回滚`,
       description: `回滚到版本 ${targetVersion.versionNo}`,
-      snapshot: currentSnapshot,
+      snapshot: effectiveSnapshot,
       status: 'approved',
       createdBy: currentOperatorName.value,
       createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
@@ -545,15 +553,15 @@ export const useBonusStore = defineStore('bonus', () => {
         v.isCurrent = false
       }
     })
-    bonusPlanVersions.value.unshift(rollbackVersion)
-    bonusPool.value = JSON.parse(JSON.stringify(targetVersion.snapshot.bonusPool))
-    departments.value = JSON.parse(JSON.stringify(targetVersion.snapshot.departments))
-    performanceLevels.value = JSON.parse(JSON.stringify(targetVersion.snapshot.performanceLevels))
-    performanceDistributionRatios.value = JSON.parse(JSON.stringify(targetVersion.snapshot.performanceDistributionRatios))
-    employeeTags.value = JSON.parse(JSON.stringify(targetVersion.snapshot.employeeTags))
+    bonusPool.value = JSON.parse(JSON.stringify(effectiveSnapshot.bonusPool))
+    departments.value = JSON.parse(JSON.stringify(effectiveSnapshot.departments))
+    performanceLevels.value = JSON.parse(JSON.stringify(effectiveSnapshot.performanceLevels))
+    performanceDistributionRatios.value = JSON.parse(JSON.stringify(effectiveSnapshot.performanceDistributionRatios))
+    employeeTags.value = JSON.parse(JSON.stringify(effectiveSnapshot.employeeTags))
     for (const dept of departments.value) {
       bonusPool.value.departmentRatios[dept.id] = dept.allocationRatio
     }
+    bonusPlanVersions.value.unshift(rollbackVersion)
     addApprovalRecord({
       versionId: rollbackVersion.id,
       action: 'rollback',
@@ -566,7 +574,6 @@ export const useBonusStore = defineStore('bonus', () => {
       currentVersion.isCurrent = false
       currentVersion.status = 'rolled_back'
     }
-    targetVersion.isCurrent = false
     return true
   }
 
