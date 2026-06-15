@@ -16,7 +16,13 @@ import type {
   CalibrationResult,
   CalibrationEmployee,
   CalibrationScope,
-  EmployeeTagExpiryWarning
+  EmployeeTagExpiryWarning,
+  BonusPlanVersion,
+  BonusPlanVersionStatus,
+  BonusPlanVersionSnapshot,
+  BonusPlanVersionDiff,
+  VersionApprovalRecord,
+  ApprovalActionType
 } from '@/types'
 import {
   generateId,
@@ -213,6 +219,370 @@ export const useBonusStore = defineStore('bonus', () => {
   const selectedEmployeeId = ref<string | null>(
     departments.value[0]?.employees[0]?.id || null
   )
+
+  const bonusPlanVersions = ref<BonusPlanVersion[]>([])
+  const versionApprovalRecords = ref<VersionApprovalRecord[]>([])
+  const currentOperatorName = ref('当前用户')
+
+  function createSnapshot(): BonusPlanVersionSnapshot {
+    return {
+      bonusPool: JSON.parse(JSON.stringify(bonusPool.value)),
+      departments: JSON.parse(JSON.stringify(departments.value)),
+      performanceLevels: JSON.parse(JSON.stringify(performanceLevels.value)),
+      performanceDistributionRatios: JSON.parse(JSON.stringify(performanceDistributionRatios.value)),
+      employeeTags: JSON.parse(JSON.stringify(employeeTags.value))
+    }
+  }
+
+  function generateVersionNo(): string {
+    const now = dayjs()
+    const datePart = now.format('YYYYMMDD')
+    const todayVersions = bonusPlanVersions.value.filter(v =>
+      v.createdAt.startsWith(now.format('YYYY-MM-DD'))
+    ).length
+    const seqPart = String(todayVersions + 1).padStart(3, '0')
+    return `V${datePart}.${seqPart}`
+  }
+
+  function createVersion(params: {
+    name: string
+    description: string
+    changeSummary: string
+  }): BonusPlanVersion {
+    const snapshot = createSnapshot()
+    const version: BonusPlanVersion = {
+      id: generateId(),
+      versionNo: generateVersionNo(),
+      name: params.name,
+      description: params.description,
+      snapshot,
+      status: 'draft',
+      createdBy: currentOperatorName.value,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      changeSummary: params.changeSummary,
+      isCurrent: false
+    }
+    bonusPlanVersions.value.unshift(version)
+    addApprovalRecord({
+      versionId: version.id,
+      action: 'submit',
+      operatorName: currentOperatorName.value,
+      comment: '创建新版本',
+      previousStatus: 'draft',
+      newStatus: 'draft'
+    })
+    return version
+  }
+
+  function getVersionById(id: string): BonusPlanVersion | undefined {
+    return bonusPlanVersions.value.find(v => v.id === id)
+  }
+
+  function getVersionsByStatus(status?: BonusPlanVersionStatus): BonusPlanVersion[] {
+    if (status) {
+      return bonusPlanVersions.value.filter(v => v.status === status)
+    }
+    return bonusPlanVersions.value
+  }
+
+  function getCurrentVersion(): BonusPlanVersion | undefined {
+    return bonusPlanVersions.value.find(v => v.isCurrent)
+  }
+
+  function deleteVersion(id: string): boolean {
+    const idx = bonusPlanVersions.value.findIndex(v => v.id === id)
+    if (idx !== -1) {
+      const version = bonusPlanVersions.value[idx]
+      if (version.status === 'approved' && version.isCurrent) {
+        return false
+      }
+      bonusPlanVersions.value.splice(idx, 1)
+      return true
+    }
+    return false
+  }
+
+  function addApprovalRecord(params: {
+    versionId: string
+    action: ApprovalActionType
+    operatorName: string
+    comment: string
+    previousStatus: BonusPlanVersionStatus
+    newStatus: BonusPlanVersionStatus
+  }) {
+    const record: VersionApprovalRecord = {
+      id: generateId(),
+      versionId: params.versionId,
+      action: params.action,
+      operatorName: params.operatorName,
+      comment: params.comment,
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      previousStatus: params.previousStatus,
+      newStatus: params.newStatus
+    }
+    versionApprovalRecords.value.push(record)
+    const version = getVersionById(params.versionId)
+    if (version) {
+      version.updatedAt = record.operatedAt
+    }
+  }
+
+  function getApprovalRecordsByVersionId(versionId: string): VersionApprovalRecord[] {
+    return versionApprovalRecords.value
+      .filter(r => r.versionId === versionId)
+      .sort((a, b) => dayjs(b.operatedAt).valueOf() - dayjs(a.operatedAt).valueOf())
+  }
+
+  function submitVersionForApproval(id: string): boolean {
+    const version = getVersionById(id)
+    if (!version || version.status !== 'draft') return false
+    const oldStatus = version.status
+    version.status = 'pending_approval'
+    addApprovalRecord({
+      versionId: id,
+      action: 'submit',
+      operatorName: currentOperatorName.value,
+      comment: '提交审批',
+      previousStatus: oldStatus,
+      newStatus: 'pending_approval'
+    })
+    return true
+  }
+
+  function approveVersion(id: string, comment: string = ''): boolean {
+    const version = getVersionById(id)
+    if (!version || version.status !== 'pending_approval') return false
+    const oldStatus = version.status
+    version.status = 'approved'
+    version.approvedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    version.approvedBy = currentOperatorName.value
+    bonusPlanVersions.value.forEach(v => {
+      if (v.id !== id && v.isCurrent) {
+        v.isCurrent = false
+      }
+    })
+    version.isCurrent = true
+    addApprovalRecord({
+      versionId: id,
+      action: 'approve',
+      operatorName: currentOperatorName.value,
+      comment: comment || '审批通过',
+      previousStatus: oldStatus,
+      newStatus: 'approved'
+    })
+    return true
+  }
+
+  function rejectVersion(id: string, reason: string): boolean {
+    const version = getVersionById(id)
+    if (!version || version.status !== 'pending_approval') return false
+    const oldStatus = version.status
+    version.status = 'rejected'
+    version.rejectionReason = reason
+    addApprovalRecord({
+      versionId: id,
+      action: 'reject',
+      operatorName: currentOperatorName.value,
+      comment: reason,
+      previousStatus: oldStatus,
+      newStatus: 'rejected'
+    })
+    return true
+  }
+
+  function withdrawVersion(id: string): boolean {
+    const version = getVersionById(id)
+    if (!version || version.status !== 'pending_approval') return false
+    const oldStatus = version.status
+    version.status = 'draft'
+    addApprovalRecord({
+      versionId: id,
+      action: 'withdraw',
+      operatorName: currentOperatorName.value,
+      comment: '撤回审批',
+      previousStatus: oldStatus,
+      newStatus: 'draft'
+    })
+    return true
+  }
+
+  function compareObjects(obj1: any, obj2: any, path: string = ''): BonusPlanVersionDiff[] {
+    const results: BonusPlanVersionDiff[] = []
+    const allKeys = new Set([...Object.keys(obj1 || {}), ...Object.keys(obj2 || {})])
+    const fieldLabels: Record<string, string> = {
+      totalAmount: '奖金总额',
+      baseRatio: '基础薪资倍数',
+      performanceRatio: '绩效影响比例',
+      tenureRatio: '工龄影响比例',
+      capEnabled: '单人奖金封顶',
+      capAmount: '封顶金额',
+      floorEnabled: '单人奖金保底',
+      floorAmount: '保底金额',
+      departmentRatios: '部门分配比例',
+      name: '名称',
+      allocationRatio: '分配比例',
+      coefficient: '系数',
+      description: '描述',
+      maxRatio: '最大比例'
+    }
+    for (const key of allKeys) {
+      const currentPath = path ? `${path}.${key}` : key
+      const label = fieldLabels[key] || key
+      const val1 = obj1?.[key]
+      const val2 = obj2?.[key]
+      if (typeof val1 === 'object' && typeof val2 === 'object' && val1 !== null && val2 !== null && !Array.isArray(val1) && !Array.isArray(val2)) {
+        results.push(...compareObjects(val1, val2, currentPath))
+      } else if (Array.isArray(val1) && Array.isArray(val2)) {
+        const maxLen = Math.max(val1.length, val2.length)
+        for (let i = 0; i < maxLen; i++) {
+          const arrayPath = `${currentPath}[${i}]`
+          const item1 = val1[i]
+          const item2 = val2[i]
+          if (item1 === undefined) {
+            results.push({
+              field: key,
+              label: `${label}[${i}]`,
+              oldValue: undefined,
+              newValue: item2,
+              changeType: 'added',
+              path: arrayPath
+            })
+          } else if (item2 === undefined) {
+            results.push({
+              field: key,
+              label: `${label}[${i}]`,
+              oldValue: item1,
+              newValue: undefined,
+              changeType: 'removed',
+              path: arrayPath
+            })
+          } else if (typeof item1 === 'object' && typeof item2 === 'object') {
+            results.push(...compareObjects(item1, item2, arrayPath))
+          } else if (JSON.stringify(item1) !== JSON.stringify(item2)) {
+            results.push({
+              field: key,
+              label: `${label}[${i}]`,
+              oldValue: item1,
+              newValue: item2,
+              changeType: 'modified',
+              path: arrayPath
+            })
+          } else {
+            results.push({
+              field: key,
+              label: `${label}[${i}]`,
+              oldValue: item1,
+              newValue: item2,
+              changeType: 'unchanged',
+              path: arrayPath
+            })
+          }
+        }
+      } else if (JSON.stringify(val1) !== JSON.stringify(val2)) {
+        results.push({
+          field: key,
+          label,
+          oldValue: val1,
+          newValue: val2,
+          changeType: val1 === undefined ? 'added' : val2 === undefined ? 'removed' : 'modified',
+          path: currentPath
+        })
+      } else {
+        results.push({
+          field: key,
+          label,
+          oldValue: val1,
+          newValue: val2,
+          changeType: 'unchanged',
+          path: currentPath
+        })
+      }
+    }
+    return results
+  }
+
+  function compareVersions(versionId1: string, versionId2: string): BonusPlanVersionDiff[] | null {
+    const v1 = getVersionById(versionId1)
+    const v2 = getVersionById(versionId2)
+    if (!v1 || !v2) return null
+    return compareObjects(v1.snapshot, v2.snapshot)
+  }
+
+  function compareWithCurrent(versionId: string): BonusPlanVersionDiff[] | null {
+    const current = getCurrentVersion()
+    if (!current) return null
+    return compareVersions(versionId, current.id)
+  }
+
+  function getChangedFields(diffs: BonusPlanVersionDiff[]): BonusPlanVersionDiff[] {
+    return diffs.filter(d => d.changeType !== 'unchanged')
+  }
+
+  function rollbackToVersion(versionId: string, reason: string): boolean {
+    const targetVersion = getVersionById(versionId)
+    if (!targetVersion || targetVersion.status !== 'approved') return false
+    const currentVersion = getCurrentVersion()
+    const currentSnapshot = createSnapshot()
+    const rollbackVersion: BonusPlanVersion = {
+      id: generateId(),
+      versionNo: generateVersionNo(),
+      name: `${targetVersion.name}-回滚`,
+      description: `回滚到版本 ${targetVersion.versionNo}`,
+      snapshot: currentSnapshot,
+      status: 'approved',
+      createdBy: currentOperatorName.value,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      approvedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      approvedBy: currentOperatorName.value,
+      changeSummary: `回滚操作：${reason}，回滚到版本 ${targetVersion.versionNo}`,
+      isCurrent: true,
+      rollbackFromVersionId: versionId
+    }
+    bonusPlanVersions.value.forEach(v => {
+      if (v.isCurrent) {
+        v.isCurrent = false
+      }
+    })
+    bonusPlanVersions.value.unshift(rollbackVersion)
+    bonusPool.value = JSON.parse(JSON.stringify(targetVersion.snapshot.bonusPool))
+    departments.value = JSON.parse(JSON.stringify(targetVersion.snapshot.departments))
+    performanceLevels.value = JSON.parse(JSON.stringify(targetVersion.snapshot.performanceLevels))
+    performanceDistributionRatios.value = JSON.parse(JSON.stringify(targetVersion.snapshot.performanceDistributionRatios))
+    employeeTags.value = JSON.parse(JSON.stringify(targetVersion.snapshot.employeeTags))
+    for (const dept of departments.value) {
+      bonusPool.value.departmentRatios[dept.id] = dept.allocationRatio
+    }
+    addApprovalRecord({
+      versionId: rollbackVersion.id,
+      action: 'rollback',
+      operatorName: currentOperatorName.value,
+      comment: reason,
+      previousStatus: currentVersion?.status || 'approved',
+      newStatus: 'approved'
+    })
+    if (currentVersion) {
+      currentVersion.isCurrent = false
+      currentVersion.status = 'rolled_back'
+    }
+    targetVersion.isCurrent = false
+    return true
+  }
+
+  function applyVersionSnapshot(versionId: string): boolean {
+    const version = getVersionById(versionId)
+    if (!version) return false
+    bonusPool.value = JSON.parse(JSON.stringify(version.snapshot.bonusPool))
+    departments.value = JSON.parse(JSON.stringify(version.snapshot.departments))
+    performanceLevels.value = JSON.parse(JSON.stringify(version.snapshot.performanceLevels))
+    performanceDistributionRatios.value = JSON.parse(JSON.stringify(version.snapshot.performanceDistributionRatios))
+    employeeTags.value = JSON.parse(JSON.stringify(version.snapshot.employeeTags))
+    for (const dept of departments.value) {
+      bonusPool.value.departmentRatios[dept.id] = dept.allocationRatio
+    }
+    return true
+  }
 
   function addPerformanceLevel(level: Omit<PerformanceLevel, 'id'>) {
     performanceLevels.value.push({ ...level, id: generateId() })
@@ -1011,7 +1381,9 @@ export const useBonusStore = defineStore('bonus', () => {
       bonusPool: bonusPool.value,
       comprehensiveIncome: comprehensiveIncome.value,
       performanceDistributionRatios: performanceDistributionRatios.value,
-      calibrationResults: calibrationResults.value
+      calibrationResults: calibrationResults.value,
+      bonusPlanVersions: bonusPlanVersions.value,
+      versionApprovalRecords: versionApprovalRecords.value
     }
   }
 
@@ -1037,6 +1409,8 @@ export const useBonusStore = defineStore('bonus', () => {
         initDistributionRatios()
       }
       calibrationResults.value = data.calibrationResults || []
+      bonusPlanVersions.value = data.bonusPlanVersions || []
+      versionApprovalRecords.value = data.versionApprovalRecords || []
       currentCalibration.value = null
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
       return true
@@ -1069,6 +1443,24 @@ export const useBonusStore = defineStore('bonus', () => {
     calibrationHalf,
     calibrationScope,
     calibrationDeptId,
+    bonusPlanVersions,
+    versionApprovalRecords,
+    currentOperatorName,
+    createVersion,
+    getVersionById,
+    getVersionsByStatus,
+    getCurrentVersion,
+    deleteVersion,
+    submitVersionForApproval,
+    approveVersion,
+    rejectVersion,
+    withdrawVersion,
+    compareVersions,
+    compareWithCurrent,
+    getChangedFields,
+    rollbackToVersion,
+    applyVersionSnapshot,
+    getApprovalRecordsByVersionId,
     addPerformanceLevel,
     updatePerformanceLevel,
     removePerformanceLevel,

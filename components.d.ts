@@ -62,6 +62,8 @@ declare module 'vue' {
     NTabs: typeof import('naive-ui')['NTabs']
     NTag: typeof import('naive-ui')['NTag']
     NText: typeof import('naive-ui')['NText']
+    NTimeline: typeof import('naive-ui')['NTimeline']
+    NTimelineItem: typeof import('naive-ui')['NTimelineItem']
     NUpload: typeof import('naive-ui')['NUpload']
     OverviewDashboard: typeof import('./src/components/OverviewDashboard.vue')['default']
     PerformanceCalibration: typeof import('./src/components/PerformanceCalibration.vue')['default']

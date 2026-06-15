@@ -144,6 +144,56 @@ export interface TaxBracket {
   quickDeduction: number
 }
 
+export type BonusPlanVersionStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'rolled_back'
+
+export interface BonusPlanVersionSnapshot {
+  bonusPool: BonusPoolConfig
+  departments: Department[]
+  performanceLevels: PerformanceLevel[]
+  performanceDistributionRatios: PerformanceDistributionRatio[]
+  employeeTags: EmployeeTag[]
+}
+
+export interface BonusPlanVersion {
+  id: string
+  versionNo: string
+  name: string
+  description: string
+  snapshot: BonusPlanVersionSnapshot
+  status: BonusPlanVersionStatus
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  approvedAt?: string
+  approvedBy?: string
+  rejectionReason?: string
+  changeSummary: string
+  isCurrent: boolean
+  rollbackFromVersionId?: string
+}
+
+export interface BonusPlanVersionDiff {
+  field: string
+  label: string
+  oldValue: any
+  newValue: any
+  changeType: 'added' | 'removed' | 'modified' | 'unchanged'
+  path: string
+}
+
+export type ApprovalActionType = 'submit' | 'approve' | 'reject' | 'withdraw' | 'rollback'
+
+export interface VersionApprovalRecord {
+  id: string
+  versionId: string
+  action: ApprovalActionType
+  operatorName: string
+  comment: string
+  operatedAt: string
+  previousStatus: BonusPlanVersionStatus
+  newStatus: BonusPlanVersionStatus
+}
+
 export interface AppData {
   performanceLevels: PerformanceLevel[]
   employeeTags: EmployeeTag[]
@@ -152,6 +202,8 @@ export interface AppData {
   comprehensiveIncome: Record<string, ComprehensiveIncomeInfo>
   performanceDistributionRatios: PerformanceDistributionRatio[]
   calibrationResults: CalibrationResult[]
+  bonusPlanVersions?: BonusPlanVersion[]
+  versionApprovalRecords?: VersionApprovalRecord[]
 }
 
 export type AdjustmentReasonCategory =
