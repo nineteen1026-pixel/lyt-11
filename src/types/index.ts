@@ -644,3 +644,64 @@ export interface AnnualCompensationReviewReport {
   salaryAdjustmentByCategory?: Record<AdjustmentReasonCategory, number>
 }
 
+export interface SandboxLevelDistribution {
+  levelId: string
+  levelName: string
+  ratio: number
+  coefficient: number
+}
+
+export interface SandboxKeyMetrics {
+  totalBonusPool: number
+  actualTotalBonus: number
+  averageBonus: number
+  medianBonus: number
+  maxBonus: number
+  minBonus: number
+  totalEmployees: number
+  totalTaxOneTime: number
+  totalTaxComprehensive: number
+  averageTaxSaving: number
+  levelBonusDistribution: Record<string, {
+    count: number
+    ratio: number
+    averageBonus: number
+    totalBonus: number
+  }>
+  departmentBonusDistribution: Record<string, {
+    count: number
+    averageBonus: number
+    totalBonus: number
+    allocationRatio: number
+  }>
+  cappedCount: number
+  flooredCount: number
+  adjustmentImpact: number
+}
+
+export interface BonusSandboxScenario {
+  id: string
+  name: string
+  description: string
+  color: string
+  createdAt: string
+  updatedAt: string
+  bonusPoolConfig: BonusPoolConfig
+  levelDistributions: SandboxLevelDistribution[]
+  isBaseline: boolean
+  metrics?: SandboxKeyMetrics
+}
+
+export interface SandboxComparisonColumn {
+  key: string
+  label: string
+  unit?: string
+  isBetter: 'higher' | 'lower' | 'neutral'
+  format?: 'currency' | 'percentage' | 'number' | 'count'
+}
+
+export interface BonusSandboxModuleData {
+  scenarios: BonusSandboxScenario[]
+  activeScenarioIds: string[]
+}
+

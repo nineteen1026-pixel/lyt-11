@@ -16,6 +16,7 @@ declare module 'vue' {
     BonusConfirmationList: typeof import('./src/components/BonusConfirmationList.vue')['default']
     BonusPoolConfig: typeof import('./src/components/BonusPoolConfig.vue')['default']
     BonusReviewPanel: typeof import('./src/components/BonusReviewPanel.vue')['default']
+    BonusSandboxSimulation: typeof import('./src/components/BonusSandboxSimulation.vue')['default']
     BonusSignDetail: typeof import('./src/components/BonusSignDetail.vue')['default']
     BonusTimeoutWarning: typeof import('./src/components/BonusTimeoutWarning.vue')['default']
     EmployeeCompensationArchive: typeof import('./src/components/EmployeeCompensationArchive.vue')['default']

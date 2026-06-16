@@ -141,6 +141,10 @@
             <template v-else-if="activeMenu === 'bonus-review'">
               <BonusReviewPanel />
             </template>
+
+            <template v-else-if="activeMenu === 'sandbox'">
+              <BonusSandboxSimulation />
+            </template>
           </n-space>
         </n-layout-content>
 
@@ -191,7 +195,8 @@ import {
   BarChartOutlined,
   CheckCircleOutlined,
   AuditOutlined,
-  SendOutlined
+  SendOutlined,
+  ExperimentOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
@@ -214,6 +219,7 @@ import BonusConfirmationList from '@/components/BonusConfirmationList.vue'
 import BonusSignDetail from '@/components/BonusSignDetail.vue'
 import BonusReviewPanel from '@/components/BonusReviewPanel.vue'
 import BonusTimeoutWarning from '@/components/BonusTimeoutWarning.vue'
+import BonusSandboxSimulation from '@/components/BonusSandboxSimulation.vue'
 import dayjs from 'dayjs'
 import type { AppData, SalaryAdjustmentModuleData } from '@/types'
 
@@ -326,6 +332,11 @@ const menuOptions: MenuOption[] = [
         icon: () => h(AuditOutlined)
       }
     ]
+  },
+  {
+    label: '奖金方案沙盘推演',
+    key: 'sandbox',
+    icon: () => h(ExperimentOutlined)
   }
 ]
 
@@ -347,7 +358,8 @@ const currentTitle = computed(() => {
     'annual-review': '📊 年度薪酬包复盘',
     'bonus-batches': '📦 奖金确认批次管理',
     'bonus-confirmations': '📝 员工奖金确认列表',
-    'bonus-review': '🔍 异议复核处理'
+    'bonus-review': '🔍 异议复核处理',
+    sandbox: '🧪 奖金方案沙盘推演'
   }
   return map[activeMenu.value] || ''
 })

@@ -29,7 +29,11 @@ import type {
   ObjectionRecord,
   ReviewRecord,
   TimeoutWarning,
-  BonusConfirmationModuleData
+  BonusConfirmationModuleData,
+  BonusSandboxScenario,
+  SandboxKeyMetrics,
+  SandboxLevelDistribution,
+  BonusSandboxModuleData
 } from '@/types'
 import {
   generateId,
@@ -1877,6 +1881,492 @@ export const useBonusStore = defineStore('bonus', () => {
     }
   }
 
+  const sandboxScenarios = ref<BonusSandboxScenario[]>([])
+  const activeSandboxScenarioIds = ref<string[]>([])
+  const selectedSandboxScenarioId = ref<string | null>(null)
+
+  const SANDBOX_COLORS = ['#1890ff', '#52c41a', '#fa8c16', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#faad14']
+
+  function createSandboxScenario(params: {
+    name: string
+    description: string
+    isBaseline?: boolean
+  }): BonusSandboxScenario {
+    const existingCount = sandboxScenarios.value.length
+    const color = SANDBOX_COLORS[existingCount % SANDBOX_COLORS.length]
+
+    const levelDistributions: SandboxLevelDistribution[] = performanceLevels.value.map((level) => {
+      const ratioItem = performanceDistributionRatios.value.find((r) => r.levelId === level.id)
+      return {
+        levelId: level.id,
+        levelName: level.name,
+        ratio: ratioItem?.maxRatio || 0.1,
+        coefficient: level.coefficient
+      }
+    })
+
+    const scenario: BonusSandboxScenario = {
+      id: generateId(),
+      name: params.name,
+      description: params.description,
+      color,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      bonusPoolConfig: JSON.parse(JSON.stringify(bonusPool.value)),
+      levelDistributions,
+      isBaseline: params.isBaseline || false
+    }
+
+    sandboxScenarios.value.push(scenario)
+
+    if (activeSandboxScenarioIds.value.length < 4) {
+      activeSandboxScenarioIds.value.push(scenario.id)
+    }
+
+    return scenario
+  }
+
+  function updateSandboxScenario(scenarioId: string, updates: Partial<BonusSandboxScenario>) {
+    const idx = sandboxScenarios.value.findIndex((s) => s.id === scenarioId)
+    if (idx !== -1) {
+      sandboxScenarios.value[idx] = {
+        ...sandboxScenarios.value[idx],
+        ...updates,
+        updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      }
+    }
+  }
+
+  function deleteSandboxScenario(scenarioId: string): boolean {
+    const idx = sandboxScenarios.value.findIndex((s) => s.id === scenarioId)
+    if (idx !== -1) {
+      sandboxScenarios.value.splice(idx, 1)
+      activeSandboxScenarioIds.value = activeSandboxScenarioIds.value.filter((id) => id !== scenarioId)
+      if (selectedSandboxScenarioId.value === scenarioId) {
+        selectedSandboxScenarioId.value = sandboxScenarios.value[0]?.id || null
+      }
+      return true
+    }
+    return false
+  }
+
+  function toggleSandboxScenarioActive(scenarioId: string) {
+    const idx = activeSandboxScenarioIds.value.indexOf(scenarioId)
+    if (idx !== -1) {
+      activeSandboxScenarioIds.value.splice(idx, 1)
+    } else if (activeSandboxScenarioIds.value.length < 4) {
+      activeSandboxScenarioIds.value.push(scenarioId)
+    }
+  }
+
+  function calculateSandboxMetrics(scenario: BonusSandboxScenario): SandboxKeyMetrics {
+    const tempEmployees: (Employee & { simulatedLevelId: string })[] = []
+
+    for (const dept of departments.value) {
+      for (const emp of dept.employees) {
+        tempEmployees.push({
+          ...emp,
+          simulatedLevelId: emp.performanceLevelId
+        })
+      }
+    }
+
+    const totalEmployees = tempEmployees.length
+    const sortedByScore = [...tempEmployees].sort((a, b) => {
+      const scoreA = getPerformanceCoefficient(a.performanceLevelId) * 100 + a.baseSalary / 1000
+      const scoreB = getPerformanceCoefficient(b.performanceLevelId) * 100 + b.baseSalary / 1000
+      return scoreB - scoreA
+    })
+
+    let assignedCount = 0
+    for (const dist of scenario.levelDistributions) {
+      const count = Math.floor(totalEmployees * dist.ratio)
+      for (let i = 0; i < count && assignedCount + i < sortedByScore.length; i++) {
+        sortedByScore[assignedCount + i].simulatedLevelId = dist.levelId
+      }
+      assignedCount += count
+    }
+
+    while (assignedCount < totalEmployees && scenario.levelDistributions.length > 0) {
+      sortedByScore[assignedCount].simulatedLevelId = scenario.levelDistributions[0].levelId
+      assignedCount++
+    }
+
+    const simulatedCoefficientMap: Record<string, number> = {}
+    for (const dist of scenario.levelDistributions) {
+      simulatedCoefficientMap[dist.levelId] = dist.coefficient
+    }
+
+    const deptBaseTotals: Record<string, number> = {}
+    for (const dept of departments.value) {
+      let total = 0
+      for (const emp of dept.employees) {
+        const simulatedEmp = sortedByScore.find((e) => e.id === emp.id)!
+        const salary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+        const base = salary * scenario.bonusPoolConfig.baseRatio
+        const perfCoeff = simulatedCoefficientMap[simulatedEmp.simulatedLevelId] || 1
+        const performance = base * perfCoeff * scenario.bonusPoolConfig.performanceRatio
+        const empImpacts = getEmployeeImpacts(emp.id)
+        const totalAdjustmentRatio = empImpacts.reduce((sum, imp) => {
+          if (imp.oldValue > 0) {
+            return sum + (imp.newValue - imp.oldValue) / imp.oldValue
+          }
+          return sum
+        }, 0)
+        const tenure = calculateAdjustedTenureBonus(emp, base, totalAdjustmentRatio)
+        const tagBonus = base * getTagCoefficient(emp.tagIds)
+        total += round2(base + performance + tenure + tagBonus)
+      }
+      deptBaseTotals[dept.id] = total
+    }
+
+    const deptAllocations: Record<string, number> = {}
+    for (const dept of departments.value) {
+      deptAllocations[dept.id] = round2(
+        scenario.bonusPoolConfig.totalAmount * (scenario.bonusPoolConfig.departmentRatios[dept.id] || 0)
+      )
+    }
+
+    const rawResults: {
+      employeeId: string
+      grossBonus: number
+      adjustmentType: AdjustmentType
+      adjustmentAmount: number
+      departmentId: string
+      simulatedLevelId: string
+      taxOneTime: number
+      taxComprehensive: number
+      netBonusOneTime: number
+      netBonusComprehensive: number
+      savedTax: number
+    }[] = []
+
+    for (const dept of departments.value) {
+      const deptAlloc = deptAllocations[dept.id] || 0
+      const deptBaseTotal = deptBaseTotals[dept.id] || 1
+
+      for (const emp of dept.employees) {
+        const simulatedEmp = sortedByScore.find((e) => e.id === emp.id)!
+        const salary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+        const base = salary * scenario.bonusPoolConfig.baseRatio
+        const perfCoeff = simulatedCoefficientMap[simulatedEmp.simulatedLevelId] || 1
+        const performance = round2(base * perfCoeff * scenario.bonusPoolConfig.performanceRatio)
+        const empImpacts = getEmployeeImpacts(emp.id)
+        const totalAdjustmentRatio = empImpacts.reduce((sum, imp) => {
+          if (imp.oldValue > 0) {
+            return sum + (imp.newValue - imp.oldValue) / imp.oldValue
+          }
+          return sum
+        }, 0)
+        const tenure = calculateAdjustedTenureBonus(emp, base, totalAdjustmentRatio)
+        const tagBonus = round2(base * getTagCoefficient(emp.tagIds))
+        const baseAmount = round2(base + performance + tenure + tagBonus)
+        const scaleFactor = deptAlloc / deptBaseTotal
+        const grossBonus = round2(baseAmount * scaleFactor)
+
+        rawResults.push({
+          employeeId: emp.id,
+          grossBonus,
+          adjustmentType: 'none',
+          adjustmentAmount: 0,
+          departmentId: dept.id,
+          simulatedLevelId: simulatedEmp.simulatedLevelId,
+          taxOneTime: 0,
+          taxComprehensive: 0,
+          netBonusOneTime: 0,
+          netBonusComprehensive: 0,
+          savedTax: 0
+        })
+      }
+    }
+
+    const { capEnabled, capAmount, floorEnabled, floorAmount } = scenario.bonusPoolConfig
+    let redistributedPool = 0
+
+    const adjusted = rawResults.map((r) => {
+      let gross = r.grossBonus
+      let adjType: AdjustmentType = 'none'
+      let adjAmount = 0
+
+      if (capEnabled && gross > capAmount) {
+        adjType = 'capped'
+        adjAmount = capAmount - gross
+        redistributedPool += gross - capAmount
+        gross = capAmount
+      } else if (floorEnabled && gross < floorAmount) {
+        adjType = 'floored'
+        adjAmount = floorAmount - gross
+        redistributedPool -= floorAmount - gross
+        gross = floorAmount
+      }
+
+      return { ...r, originalGrossBonus: r.grossBonus, adjustmentType: adjType, adjustmentAmount: adjAmount, grossBonus: gross }
+    })
+
+    if (Math.abs(redistributedPool) > 0.01) {
+      const adjustableList = adjusted.filter((r) => r.adjustmentType === 'none')
+      const adjustableTotal = adjustableList.reduce((s, r) => s + r.grossBonus, 0)
+
+      if (adjustableList.length > 0 && adjustableTotal > 0) {
+        const unit = redistributedPool / adjustableTotal
+        for (const r of adjustableList) {
+          const delta = round2(r.grossBonus * unit)
+          r.grossBonus = round2(r.grossBonus + delta)
+          r.adjustmentAmount = round2(r.adjustmentAmount + delta)
+        }
+      }
+    }
+
+    let totalTaxOneTime = 0
+    let totalTaxComprehensive = 0
+    let totalSavedTax = 0
+
+    for (const r of adjusted) {
+      const gross = r.grossBonus
+      const taxOneTime = round2(calculateOneTimeTax(gross))
+      const netOneTime = round2(gross - taxOneTime)
+
+      const emp = getEmployeeById(r.employeeId)
+      const ci = comprehensiveIncome.value[r.employeeId] || {
+        annualSalary: emp?.baseSalary ? emp.baseSalary * 12 : 0,
+        specialDeduction: 0,
+        specialAdditionalDeduction: 24000,
+        otherDeduction: 0
+      }
+      const dynamicAnnualSalary = emp ? calculateDynamicAnnualSalary(emp, bonusCalculationYear.value) : ci.annualSalary
+      const adjustedSpecialDeduction = emp ? round2(dynamicAnnualSalary * 0.22) : ci.specialDeduction
+      const compResult = calculateComprehensiveTax(
+        dynamicAnnualSalary,
+        gross,
+        adjustedSpecialDeduction,
+        ci.specialAdditionalDeduction,
+        ci.otherDeduction
+      )
+      const taxComprehensive = round2(compResult.taxDifference)
+      const netComprehensive = round2(gross - taxComprehensive)
+
+      let savedTax = 0
+      if (taxOneTime < taxComprehensive) {
+        savedTax = round2(taxComprehensive - taxOneTime)
+      } else if (taxComprehensive < taxOneTime) {
+        savedTax = round2(taxOneTime - taxComprehensive)
+      }
+
+      r.taxOneTime = taxOneTime
+      r.taxComprehensive = taxComprehensive
+      r.netBonusOneTime = netOneTime
+      r.netBonusComprehensive = netComprehensive
+      r.savedTax = savedTax
+
+      totalTaxOneTime += taxOneTime
+      totalTaxComprehensive += taxComprehensive
+      totalSavedTax += savedTax
+    }
+
+    const actualTotalBonus = adjusted.reduce((s, r) => s + r.grossBonus, 0)
+    const sortedBonuses = [...adjusted].sort((a, b) => a.grossBonus - b.grossBonus)
+    const medianBonus = sortedBonuses.length > 0
+      ? sortedBonuses.length % 2 === 0
+        ? (sortedBonuses[sortedBonuses.length / 2 - 1].grossBonus + sortedBonuses[sortedBonuses.length / 2].grossBonus) / 2
+        : sortedBonuses[Math.floor(sortedBonuses.length / 2)].grossBonus
+      : 0
+
+    const levelBonusDistribution: SandboxKeyMetrics['levelBonusDistribution'] = {}
+    for (const dist of scenario.levelDistributions) {
+      const levelResults = adjusted.filter((r) => r.simulatedLevelId === dist.levelId)
+      const count = levelResults.length
+      const totalBonus = levelResults.reduce((s, r) => s + r.grossBonus, 0)
+      levelBonusDistribution[dist.levelId] = {
+        count,
+        ratio: totalEmployees > 0 ? count / totalEmployees : 0,
+        averageBonus: count > 0 ? totalBonus / count : 0,
+        totalBonus
+      }
+    }
+
+    const departmentBonusDistribution: SandboxKeyMetrics['departmentBonusDistribution'] = {}
+    for (const dept of departments.value) {
+      const deptResults = adjusted.filter((r) => r.departmentId === dept.id)
+      const count = deptResults.length
+      const totalBonus = deptResults.reduce((s, r) => s + r.grossBonus, 0)
+      departmentBonusDistribution[dept.id] = {
+        count,
+        averageBonus: count > 0 ? totalBonus / count : 0,
+        totalBonus,
+        allocationRatio: scenario.bonusPoolConfig.departmentRatios[dept.id] || 0
+      }
+    }
+
+    const cappedCount = adjusted.filter((r) => r.adjustmentType === 'capped').length
+    const flooredCount = adjusted.filter((r) => r.adjustmentType === 'floored').length
+    const adjustmentImpact = adjusted.reduce((s, r) => s + r.adjustmentAmount, 0)
+
+    return {
+      totalBonusPool: scenario.bonusPoolConfig.totalAmount,
+      actualTotalBonus: round2(actualTotalBonus),
+      averageBonus: totalEmployees > 0 ? round2(actualTotalBonus / totalEmployees) : 0,
+      medianBonus: round2(medianBonus),
+      maxBonus: sortedBonuses.length > 0 ? sortedBonuses[sortedBonuses.length - 1].grossBonus : 0,
+      minBonus: sortedBonuses.length > 0 ? sortedBonuses[0].grossBonus : 0,
+      totalEmployees,
+      totalTaxOneTime: round2(totalTaxOneTime),
+      totalTaxComprehensive: round2(totalTaxComprehensive),
+      averageTaxSaving: totalEmployees > 0 ? round2(totalSavedTax / totalEmployees) : 0,
+      levelBonusDistribution,
+      departmentBonusDistribution,
+      cappedCount,
+      flooredCount,
+      adjustmentImpact: round2(adjustmentImpact)
+    }
+  }
+
+  function refreshAllSandboxMetrics() {
+    for (const scenario of sandboxScenarios.value) {
+      scenario.metrics = calculateSandboxMetrics(scenario)
+      scenario.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+  }
+
+  function refreshSandboxMetrics(scenarioId: string) {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (scenario) {
+      scenario.metrics = calculateSandboxMetrics(scenario)
+      scenario.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+  }
+
+  function duplicateSandboxScenario(scenarioId: string): BonusSandboxScenario | null {
+    const original = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!original) return null
+
+    const newScenario: BonusSandboxScenario = {
+      id: generateId(),
+      name: `${original.name} (副本)`,
+      description: original.description,
+      color: SANDBOX_COLORS[sandboxScenarios.value.length % SANDBOX_COLORS.length],
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      bonusPoolConfig: JSON.parse(JSON.stringify(original.bonusPoolConfig)),
+      levelDistributions: JSON.parse(JSON.stringify(original.levelDistributions)),
+      isBaseline: false
+    }
+
+    sandboxScenarios.value.push(newScenario)
+
+    if (activeSandboxScenarioIds.value.length < 4) {
+      activeSandboxScenarioIds.value.push(newScenario.id)
+    }
+
+    newScenario.metrics = calculateSandboxMetrics(newScenario)
+
+    return newScenario
+  }
+
+  function applySandboxScenario(scenarioId: string): boolean {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!scenario) return false
+
+    bonusPool.value = JSON.parse(JSON.stringify(scenario.bonusPoolConfig))
+
+    for (const dist of scenario.levelDistributions) {
+      const idx = performanceDistributionRatios.value.findIndex((r) => r.levelId === dist.levelId)
+      if (idx !== -1) {
+        performanceDistributionRatios.value[idx].maxRatio = dist.ratio
+      }
+    }
+
+    for (const dept of departments.value) {
+      const ratio = scenario.bonusPoolConfig.departmentRatios[dept.id]
+      if (ratio !== undefined) {
+        dept.allocationRatio = ratio
+      }
+    }
+
+    return true
+  }
+
+  function setBaselineScenario(scenarioId: string) {
+    for (const s of sandboxScenarios.value) {
+      s.isBaseline = s.id === scenarioId
+    }
+  }
+
+  const activeSandboxScenarios = computed(() =>
+    sandboxScenarios.value.filter((s) => activeSandboxScenarioIds.value.includes(s.id))
+  )
+
+  function exportSandboxModuleData(): BonusSandboxModuleData {
+    return {
+      scenarios: sandboxScenarios.value,
+      activeScenarioIds: activeSandboxScenarioIds.value
+    }
+  }
+
+  function importSandboxModuleData(data: BonusSandboxModuleData): boolean {
+    try {
+      sandboxScenarios.value = data.scenarios || []
+      activeSandboxScenarioIds.value = data.activeScenarioIds || []
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function initMockSandboxData() {
+    const baseline = createSandboxScenario({
+      name: '基准方案',
+      description: '当前配置的基准方案，基于现有绩效分布和奖金池',
+      isBaseline: true
+    })
+    baseline.metrics = calculateSandboxMetrics(baseline)
+
+    const conservative = createSandboxScenario({
+      name: '保守方案',
+      description: '降低高绩效比例，控制奖金总额，适合预算紧张情况'
+    })
+    conservative.bonusPoolConfig.totalAmount = 1800000
+    conservative.levelDistributions = conservative.levelDistributions.map((d) => {
+      if (d.levelName === 'S') return { ...d, ratio: 0.05 }
+      if (d.levelName === 'A+') return { ...d, ratio: 0.15 }
+      if (d.levelName === 'A') return { ...d, ratio: 0.35 }
+      if (d.levelName === 'B+') return { ...d, ratio: 0.3 }
+      if (d.levelName === 'B') return { ...d, ratio: 0.12 }
+      if (d.levelName === 'C') return { ...d, ratio: 0.03 }
+      return d
+    })
+    conservative.metrics = calculateSandboxMetrics(conservative)
+
+    const aggressive = createSandboxScenario({
+      name: '激进方案',
+      description: '提高高绩效比例，激励优秀员工，适合业绩增长期'
+    })
+    aggressive.bonusPoolConfig.totalAmount = 2500000
+    aggressive.bonusPoolConfig.performanceRatio = 0.7
+    aggressive.levelDistributions = aggressive.levelDistributions.map((d) => {
+      if (d.levelName === 'S') return { ...d, ratio: 0.15 }
+      if (d.levelName === 'A+') return { ...d, ratio: 0.25 }
+      if (d.levelName === 'A') return { ...d, ratio: 0.3 }
+      if (d.levelName === 'B+') return { ...d, ratio: 0.2 }
+      if (d.levelName === 'B') return { ...d, ratio: 0.08 }
+      if (d.levelName === 'C') return { ...d, ratio: 0.02 }
+      return d
+    })
+    aggressive.metrics = calculateSandboxMetrics(aggressive)
+
+    const balanced = createSandboxScenario({
+      name: '均衡方案',
+      description: '平衡各等级比例，兼顾公平与激励'
+    })
+    balanced.bonusPoolConfig.totalAmount = 2200000
+    balanced.bonusPoolConfig.capEnabled = true
+    balanced.bonusPoolConfig.capAmount = 400000
+    balanced.bonusPoolConfig.floorEnabled = true
+    balanced.bonusPoolConfig.floorAmount = 20000
+    balanced.metrics = calculateSandboxMetrics(balanced)
+  }
+
+  initMockSandboxData()
+
   function initMockConfirmationData() {
     const batch1 = createConfirmationBatch({
       name: '2025年度年终奖确认',
@@ -2021,6 +2511,22 @@ export const useBonusStore = defineStore('bonus', () => {
     sendReminder,
     getTimeoutWarnings,
     exportConfirmationModuleData,
-    importConfirmationModuleData
+    importConfirmationModuleData,
+    sandboxScenarios,
+    activeSandboxScenarioIds,
+    selectedSandboxScenarioId,
+    activeSandboxScenarios,
+    createSandboxScenario,
+    updateSandboxScenario,
+    deleteSandboxScenario,
+    toggleSandboxScenarioActive,
+    calculateSandboxMetrics,
+    refreshAllSandboxMetrics,
+    refreshSandboxMetrics,
+    duplicateSandboxScenario,
+    applySandboxScenario,
+    setBaselineScenario,
+    exportSandboxModuleData,
+    importSandboxModuleData
   }
 })
