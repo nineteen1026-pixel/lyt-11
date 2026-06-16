@@ -543,3 +543,104 @@ export interface SalaryAdjustmentModuleData {
   performanceHistory: PerformanceHistoryRecord[]
   bonusPayments: BonusPaymentRecord[]
 }
+
+export interface SalaryTrendPoint {
+  year: number
+  month?: number
+  label: string
+  baseSalary: number
+  adjustmentAmount: number
+  adjustmentRatio: number
+  reasonName: string
+}
+
+export interface BonusTrendPoint {
+  year: number
+  type: string
+  name: string
+  grossAmount: number
+  taxAmount: number
+  netAmount: number
+  taxMethod: TaxMethod
+}
+
+export interface PerformanceTrendPoint {
+  year: number
+  half: 'first' | 'second' | 'annual'
+  levelName: string
+  coefficient: number
+  comment?: string
+}
+
+export interface AnnualCompensationSummary {
+  year: number
+  totalBaseSalaryAnnual: number
+  totalBonusGross: number
+  totalBonusNet: number
+  totalCompensationGross: number
+  totalCompensationNet: number
+  salaryAdjustmentCount: number
+  totalAdjustmentAmount: number
+  averageAdjustmentRatio: number
+  bonusPaymentCount: number
+  performanceRecords: number
+  highestPerformanceLevel: string
+  lowestPerformanceLevel: string
+}
+
+export interface EmployeeAnnualReview {
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  year: number
+  startSalary: number
+  endSalary: number
+  salaryGrowthRate: number
+  salaryTrend: SalaryTrendPoint[]
+  bonusTrend: BonusTrendPoint[]
+  performanceTrend: PerformanceTrendPoint[]
+  summary: AnnualCompensationSummary
+  insights: {
+    salaryPosition: string
+    bonusPosition: string
+    performanceTrend: string
+    recommendation: string
+  }
+}
+
+export interface DepartmentAnnualReview {
+  departmentId: string
+  departmentName: string
+  year: number
+  headcount: number
+  averageSalary: number
+  averageBonus: number
+  totalCompensation: number
+  salaryGrowthRate: number
+  performanceDistribution: Record<string, number>
+}
+
+export interface AnnualCompensationReviewReport {
+  year: number
+  generatedAt: string
+  scope: 'company' | 'department' | 'employee'
+  scopeId?: string
+  scopeName?: string
+  companySummary?: {
+    totalHeadcount: number
+    totalAnnualSalary: number
+    totalBonusGross: number
+    totalCompensation: number
+    averageSalary: number
+    averageBonus: number
+    overallSalaryGrowth: number
+    performanceDistribution: Record<string, number>
+  }
+  departments?: DepartmentAnnualReview[]
+  employees?: EmployeeAnnualReview[]
+  topSalaryGrowth?: EmployeeAnnualReview[]
+  topBonusEarners?: EmployeeAnnualReview[]
+  salaryAdjustmentByCategory?: Record<AdjustmentReasonCategory, number>
+}
+

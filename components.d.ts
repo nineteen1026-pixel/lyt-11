@@ -9,6 +9,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AdjustmentReasonConfig: typeof import('./src/components/AdjustmentReasonConfig.vue')['default']
     AllResultsTable: typeof import('./src/components/AllResultsTable.vue')['default']
+    AnnualCompensationReview: typeof import('./src/components/AnnualCompensationReview.vue')['default']
     AppContent: typeof import('./src/components/AppContent.vue')['default']
     ApprovalWorkflowConfig: typeof import('./src/components/ApprovalWorkflowConfig.vue')['default']
     BonusConfirmationBatchList: typeof import('./src/components/BonusConfirmationBatchList.vue')['default']
@@ -19,6 +20,7 @@ declare module 'vue' {
     BonusTimeoutWarning: typeof import('./src/components/BonusTimeoutWarning.vue')['default']
     EmployeeCompensationArchive: typeof import('./src/components/EmployeeCompensationArchive.vue')['default']
     EmployeeDetail: typeof import('./src/components/EmployeeDetail.vue')['default']
+    EmployeeReviewDetail: typeof import('./src/components/EmployeeReviewDetail.vue')['default']
     EmployeeTagConfig: typeof import('./src/components/EmployeeTagConfig.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
     NAvatar: typeof import('naive-ui')['NAvatar']

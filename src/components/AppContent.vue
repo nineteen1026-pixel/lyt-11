@@ -109,6 +109,10 @@
               <EmployeeCompensationArchive />
             </template>
 
+            <template v-else-if="activeMenu === 'annual-review'">
+              <AnnualCompensationReview />
+            </template>
+
             <template v-else-if="activeMenu === 'bonus-batches'">
               <BonusConfirmationBatchList @view-batch="handleViewBatch" />
             </template>
@@ -204,6 +208,7 @@ import ApprovalWorkflowConfig from '@/components/ApprovalWorkflowConfig.vue'
 import SalaryBudgetDashboard from '@/components/SalaryBudgetDashboard.vue'
 import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
 import EmployeeCompensationArchive from '@/components/EmployeeCompensationArchive.vue'
+import AnnualCompensationReview from '@/components/AnnualCompensationReview.vue'
 import BonusConfirmationBatchList from '@/components/BonusConfirmationBatchList.vue'
 import BonusConfirmationList from '@/components/BonusConfirmationList.vue'
 import BonusSignDetail from '@/components/BonusSignDetail.vue'
@@ -292,6 +297,11 @@ const menuOptions: MenuOption[] = [
         label: '员工薪酬档案',
         key: 'compensation-archive',
         icon: () => h(ProfileOutlined)
+      },
+      {
+        label: '年度薪酬包复盘',
+        key: 'annual-review',
+        icon: () => h(BarChartOutlined)
       }
     ]
   },
@@ -334,6 +344,7 @@ const currentTitle = computed(() => {
     'salary-budget': '📊 预算控盘',
     'salary-history': '📈 历史调薪轨迹',
     'compensation-archive': '📁 员工薪酬档案',
+    'annual-review': '📊 年度薪酬包复盘',
     'bonus-batches': '📦 奖金确认批次管理',
     'bonus-confirmations': '📝 员工奖金确认列表',
     'bonus-review': '🔍 异议复核处理'
