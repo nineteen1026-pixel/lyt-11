@@ -34,6 +34,7 @@
               </n-text>
             </n-space>
             <n-space>
+              <BonusTimeoutWarning @view-all="handleViewAllWarnings" @view-record="handleViewWarningRecord" />
               <n-upload
                 :show-file-list="false"
                 accept=".json"
@@ -107,6 +108,35 @@
             <template v-else-if="activeMenu === 'compensation-archive'">
               <EmployeeCompensationArchive />
             </template>
+
+            <template v-else-if="activeMenu === 'bonus-batches'">
+              <BonusConfirmationBatchList @view-batch="handleViewBatch" />
+            </template>
+
+            <template v-else-if="activeMenu === 'bonus-confirmations'">
+              <template v-if="currentConfirmationId">
+                <BonusSignDetail
+                  :record-id="currentConfirmationId"
+                  @back="handleBackToConfirmationList"
+                  @signed="handleConfirmationUpdated"
+                  @objected="handleConfirmationUpdated"
+                />
+              </template>
+              <template v-else-if="currentBatchId">
+                <BonusConfirmationList
+                  :batch-id="currentBatchId"
+                  @back="handleBackToBatchList"
+                  @view-detail="handleViewConfirmationDetail"
+                />
+              </template>
+              <template v-else>
+                <BonusConfirmationBatchList @view-batch="handleViewBatchFromConfirmations" />
+              </template>
+            </template>
+
+            <template v-else-if="activeMenu === 'bonus-review'">
+              <BonusReviewPanel />
+            </template>
           </n-space>
         </n-layout-content>
 
@@ -154,7 +184,10 @@ import {
   PieChartOutlined,
   HistoryOutlined,
   ProfileOutlined,
-  BarChartOutlined
+  BarChartOutlined,
+  CheckCircleOutlined,
+  AuditOutlined,
+  SendOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
@@ -171,6 +204,11 @@ import ApprovalWorkflowConfig from '@/components/ApprovalWorkflowConfig.vue'
 import SalaryBudgetDashboard from '@/components/SalaryBudgetDashboard.vue'
 import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
 import EmployeeCompensationArchive from '@/components/EmployeeCompensationArchive.vue'
+import BonusConfirmationBatchList from '@/components/BonusConfirmationBatchList.vue'
+import BonusConfirmationList from '@/components/BonusConfirmationList.vue'
+import BonusSignDetail from '@/components/BonusSignDetail.vue'
+import BonusReviewPanel from '@/components/BonusReviewPanel.vue'
+import BonusTimeoutWarning from '@/components/BonusTimeoutWarning.vue'
 import dayjs from 'dayjs'
 import type { AppData, SalaryAdjustmentModuleData } from '@/types'
 
@@ -181,6 +219,8 @@ const message = useMessage()
 const collapsed = ref(false)
 const activeMenu = ref('overview')
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const currentBatchId = ref<string | null>(null)
+const currentConfirmationId = ref<string | null>(null)
 
 const menuOptions: MenuOption[] = [
   {
@@ -254,6 +294,28 @@ const menuOptions: MenuOption[] = [
         icon: () => h(ProfileOutlined)
       }
     ]
+  },
+  {
+    label: '奖金确认管理',
+    key: 'bonus-confirmation-group',
+    icon: () => h(CheckCircleOutlined),
+    children: [
+      {
+        label: '确认批次管理',
+        key: 'bonus-batches',
+        icon: () => h(FileTextOutlined)
+      },
+      {
+        label: '员工确认列表',
+        key: 'bonus-confirmations',
+        icon: () => h(SendOutlined)
+      },
+      {
+        label: '异议复核处理',
+        key: 'bonus-review',
+        icon: () => h(AuditOutlined)
+      }
+    ]
   }
 ]
 
@@ -271,7 +333,10 @@ const currentTitle = computed(() => {
     'salary-workflow': '🔀 审批流程配置',
     'salary-budget': '📊 预算控盘',
     'salary-history': '📈 历史调薪轨迹',
-    'compensation-archive': '📁 员工薪酬档案'
+    'compensation-archive': '📁 员工薪酬档案',
+    'bonus-batches': '📦 奖金确认批次管理',
+    'bonus-confirmations': '📝 员工奖金确认列表',
+    'bonus-review': '🔍 异议复核处理'
   }
   return map[activeMenu.value] || ''
 })
@@ -295,6 +360,48 @@ function handleExport() {
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
   message.success('方案已导出')
+}
+
+function handleViewBatch(batchId: string) {
+  currentBatchId.value = batchId
+  currentConfirmationId.value = null
+  activeMenu.value = 'bonus-confirmations'
+}
+
+function handleViewBatchFromConfirmations(batchId: string) {
+  currentBatchId.value = batchId
+  currentConfirmationId.value = null
+}
+
+function handleBackToBatchList() {
+  currentBatchId.value = null
+  currentConfirmationId.value = null
+}
+
+function handleViewConfirmationDetail(recordId: string) {
+  currentConfirmationId.value = recordId
+}
+
+function handleBackToConfirmationList() {
+  currentConfirmationId.value = null
+}
+
+function handleConfirmationUpdated() {
+}
+
+function handleViewAllWarnings() {
+  activeMenu.value = 'bonus-confirmations'
+  currentBatchId.value = null
+  currentConfirmationId.value = null
+}
+
+function handleViewWarningRecord(recordId: string) {
+  const record = store.getConfirmationById(recordId)
+  if (record) {
+    currentBatchId.value = record.batchId
+    currentConfirmationId.value = recordId
+    activeMenu.value = 'bonus-confirmations'
+  }
 }
 
 function handleImport({ file }: { file: File }) {

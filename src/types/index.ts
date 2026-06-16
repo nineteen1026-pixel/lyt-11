@@ -446,6 +446,94 @@ export interface EmployeeCompensationArchive {
   }
 }
 
+export type BonusConfirmationStatus =
+  | 'pending'
+  | 'signed'
+  | 'objected'
+  | 'reviewing'
+  | 'resolved_confirmed'
+  | 'resolved_adjusted'
+  | 'timeout'
+
+export interface ObjectionRecord {
+  id: string
+  reason: string
+  description: string
+  attachments: string[]
+  createdAt: string
+  objectorName: string
+}
+
+export interface ReviewRecord {
+  id: string
+  result: 'confirmed' | 'adjusted'
+  adjustedGrossAmount?: number
+  adjustedTaxAmount?: number
+  adjustedNetAmount?: number
+  comment: string
+  reviewerName: string
+  reviewedAt: string
+}
+
+export interface BonusConfirmationRecord {
+  id: string
+  batchId: string
+  employeeId: string
+  employeeName: string
+  departmentId: string
+  departmentName: string
+  position: string
+  grossAmount: number
+  taxAmount: number
+  netAmount: number
+  taxMethod: TaxMethod
+  status: BonusConfirmationStatus
+  createdAt: string
+  deadlineAt: string
+  signedAt?: string
+  signature?: string
+  objection?: ObjectionRecord
+  review?: ReviewRecord
+  timeoutNotifiedAt?: string
+  reminderCount: number
+  lastReminderAt?: string
+  year: number
+  bonusName: string
+}
+
+export interface BonusConfirmationBatch {
+  id: string
+  name: string
+  year: number
+  bonusName: string
+  status: 'draft' | 'published' | 'completed'
+  deadlineDays: number
+  createdAt: string
+  publishedAt?: string
+  completedAt?: string
+  totalConfirmations: number
+  signedCount: number
+  objectedCount: number
+  pendingCount: number
+  timeoutCount: number
+}
+
+export interface TimeoutWarning {
+  recordId: string
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  deadlineAt: string
+  remainingHours: number
+  warningLevel: 'info' | 'warning' | 'critical'
+  status: BonusConfirmationStatus
+}
+
+export interface BonusConfirmationModuleData {
+  batches: BonusConfirmationBatch[]
+  confirmations: BonusConfirmationRecord[]
+}
+
 export interface SalaryAdjustmentModuleData {
   reasons: AdjustmentReason[]
   approvalWorkflow: ApprovalNode[]

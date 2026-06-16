@@ -22,7 +22,14 @@ import type {
   BonusPlanVersionSnapshot,
   BonusPlanVersionDiff,
   VersionApprovalRecord,
-  ApprovalActionType
+  ApprovalActionType,
+  BonusConfirmationBatch,
+  BonusConfirmationRecord,
+  BonusConfirmationStatus,
+  ObjectionRecord,
+  ReviewRecord,
+  TimeoutWarning,
+  BonusConfirmationModuleData
 } from '@/types'
 import {
   generateId,
@@ -1547,6 +1554,367 @@ export const useBonusStore = defineStore('bonus', () => {
     }
   }
 
+  const bonusConfirmationBatches = ref<BonusConfirmationBatch[]>([])
+  const bonusConfirmations = ref<BonusConfirmationRecord[]>([])
+  const selectedConfirmationBatchId = ref<string | null>(null)
+  const selectedConfirmationId = ref<string | null>(null)
+
+  const CONFIRMATION_STATUS_LABELS: Record<BonusConfirmationStatus, string> = {
+    pending: '待签收',
+    signed: '已签收',
+    objected: '已异议',
+    reviewing: '复核中',
+    resolved_confirmed: '复核通过',
+    resolved_adjusted: '已调整',
+    timeout: '已超时'
+  }
+
+  const CONFIRMATION_STATUS_COLORS: Record<BonusConfirmationStatus, string> = {
+    pending: '#fa8c16',
+    signed: '#52c41a',
+    objected: '#f5222d',
+    reviewing: '#1890ff',
+    resolved_confirmed: '#52c41a',
+    resolved_adjusted: '#722ed1',
+    timeout: '#8c8c8c'
+  }
+
+  function getConfirmationStatusLabel(status: BonusConfirmationStatus): string {
+    return CONFIRMATION_STATUS_LABELS[status] || status
+  }
+
+  function getConfirmationStatusColor(status: BonusConfirmationStatus): string {
+    return CONFIRMATION_STATUS_COLORS[status] || '#8c8c8c'
+  }
+
+  function createConfirmationBatch(params: {
+    name: string
+    year: number
+    bonusName: string
+    deadlineDays: number
+  }): BonusConfirmationBatch {
+    const batch: BonusConfirmationBatch = {
+      id: generateId(),
+      name: params.name,
+      year: params.year,
+      bonusName: params.bonusName,
+      status: 'draft',
+      deadlineDays: params.deadlineDays,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      totalConfirmations: 0,
+      signedCount: 0,
+      objectedCount: 0,
+      pendingCount: 0,
+      timeoutCount: 0
+    }
+    bonusConfirmationBatches.value.unshift(batch)
+    return batch
+  }
+
+  function updateConfirmationBatch(batchId: string, updates: Partial<BonusConfirmationBatch>) {
+    const idx = bonusConfirmationBatches.value.findIndex(b => b.id === batchId)
+    if (idx !== -1) {
+      bonusConfirmationBatches.value[idx] = {
+        ...bonusConfirmationBatches.value[idx],
+        ...updates
+      }
+    }
+  }
+
+  function deleteConfirmationBatch(batchId: string): boolean {
+    const batch = bonusConfirmationBatches.value.find(b => b.id === batchId)
+    if (!batch || batch.status !== 'draft') return false
+    bonusConfirmationBatches.value = bonusConfirmationBatches.value.filter(b => b.id !== batchId)
+    bonusConfirmations.value = bonusConfirmations.value.filter(c => c.batchId !== batchId)
+    return true
+  }
+
+  function publishConfirmationBatch(batchId: string): boolean {
+    const batch = bonusConfirmationBatches.value.find(b => b.id === batchId)
+    if (!batch || batch.status !== 'draft') return false
+
+    const existingConfirmations = bonusConfirmations.value.filter(c => c.batchId === batchId)
+    if (existingConfirmations.length === 0) {
+      generateConfirmationsFromCalculation(batchId)
+    }
+
+    const confirmations = bonusConfirmations.value.filter(c => c.batchId === batchId)
+    const now = dayjs()
+    const deadline = now.add(batch.deadlineDays, 'day')
+
+    confirmations.forEach(c => {
+      c.status = 'pending'
+      c.deadlineAt = deadline.format('YYYY-MM-DD HH:mm:ss')
+    })
+
+    batch.status = 'published'
+    batch.publishedAt = now.format('YYYY-MM-DD HH:mm:ss')
+    batch.totalConfirmations = confirmations.length
+    batch.pendingCount = confirmations.length
+    updateBatchStats(batchId)
+
+    return true
+  }
+
+  function generateConfirmationsFromCalculation(batchId: string) {
+    const batch = bonusConfirmationBatches.value.find(b => b.id === batchId)
+    if (!batch) return
+
+    const results = calculationResults.value
+    const confirmations: BonusConfirmationRecord[] = results.map(r => {
+      const emp = getEmployeeById(r.employeeId)
+      const dept = getDepartmentById(emp?.departmentId || '')
+      return {
+        id: generateId(),
+        batchId,
+        employeeId: r.employeeId,
+        employeeName: r.employeeName,
+        departmentId: emp?.departmentId || '',
+        departmentName: dept?.name || '',
+        position: emp?.position || '',
+        grossAmount: r.grossBonus,
+        taxAmount: r.betterMethod === 'oneTime' ? r.taxOneTime : r.taxComprehensive,
+        netAmount: r.betterMethod === 'oneTime' ? r.netBonusOneTime : r.netBonusComprehensive,
+        taxMethod: r.betterMethod,
+        status: 'pending',
+        createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        deadlineAt: dayjs().add(batch.deadlineDays, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        reminderCount: 0,
+        year: batch.year,
+        bonusName: batch.bonusName
+      }
+    })
+
+    bonusConfirmations.value.push(...confirmations)
+  }
+
+  function updateBatchStats(batchId: string) {
+    const batch = bonusConfirmationBatches.value.find(b => b.id === batchId)
+    if (!batch) return
+
+    const confirmations = bonusConfirmations.value.filter(c => c.batchId === batchId)
+    batch.totalConfirmations = confirmations.length
+    batch.signedCount = confirmations.filter(c => c.status === 'signed' || c.status === 'resolved_confirmed' || c.status === 'resolved_adjusted').length
+    batch.objectedCount = confirmations.filter(c => c.status === 'objected' || c.status === 'reviewing').length
+    batch.pendingCount = confirmations.filter(c => c.status === 'pending').length
+    batch.timeoutCount = confirmations.filter(c => c.status === 'timeout').length
+
+    if (batch.status === 'published' && batch.pendingCount === 0 && batch.objectedCount === 0) {
+      batch.status = 'completed'
+      batch.completedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+  }
+
+  function getConfirmationsByBatch(batchId: string): BonusConfirmationRecord[] {
+    return bonusConfirmations.value.filter(c => c.batchId === batchId)
+  }
+
+  function getConfirmationById(id: string): BonusConfirmationRecord | undefined {
+    return bonusConfirmations.value.find(c => c.id === id)
+  }
+
+  function signBonus(confirmationId: string, signature: string): boolean {
+    const confirmation = bonusConfirmations.value.find(c => c.id === confirmationId)
+    if (!confirmation || confirmation.status !== 'pending') return false
+
+    confirmation.status = 'signed'
+    confirmation.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    confirmation.signature = signature
+    updateBatchStats(confirmation.batchId)
+    return true
+  }
+
+  function submitObjection(
+    confirmationId: string,
+    reason: string,
+    description: string,
+    attachments: string[] = []
+  ): boolean {
+    const confirmation = bonusConfirmations.value.find(c => c.id === confirmationId)
+    if (!confirmation || confirmation.status !== 'pending') return false
+
+    const objection: ObjectionRecord = {
+      id: generateId(),
+      reason,
+      description,
+      attachments,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      objectorName: currentOperatorName.value
+    }
+
+    confirmation.status = 'objected'
+    confirmation.objection = objection
+    updateBatchStats(confirmation.batchId)
+    return true
+  }
+
+  function startReview(confirmationId: string): boolean {
+    const confirmation = bonusConfirmations.value.find(c => c.id === confirmationId)
+    if (!confirmation || confirmation.status !== 'objected') return false
+
+    confirmation.status = 'reviewing'
+    updateBatchStats(confirmation.batchId)
+    return true
+  }
+
+  function completeReview(
+    confirmationId: string,
+    result: 'confirmed' | 'adjusted',
+    comment: string,
+    adjustedAmounts?: {
+      grossAmount: number
+      taxAmount: number
+      netAmount: number
+    }
+  ): boolean {
+    const confirmation = bonusConfirmations.value.find(c => c.id === confirmationId)
+    if (!confirmation || confirmation.status !== 'reviewing') return false
+
+    const review: ReviewRecord = {
+      id: generateId(),
+      result,
+      comment,
+      reviewerName: currentOperatorName.value,
+      reviewedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+
+    if (result === 'adjusted' && adjustedAmounts) {
+      review.adjustedGrossAmount = adjustedAmounts.grossAmount
+      review.adjustedTaxAmount = adjustedAmounts.taxAmount
+      review.adjustedNetAmount = adjustedAmounts.netAmount
+      confirmation.grossAmount = adjustedAmounts.grossAmount
+      confirmation.taxAmount = adjustedAmounts.taxAmount
+      confirmation.netAmount = adjustedAmounts.netAmount
+      confirmation.status = 'resolved_adjusted'
+    } else {
+      confirmation.status = 'resolved_confirmed'
+    }
+
+    confirmation.review = review
+    updateBatchStats(confirmation.batchId)
+    return true
+  }
+
+  function checkTimeouts(): TimeoutWarning[] {
+    const now = dayjs()
+    const warnings: TimeoutWarning[] = []
+
+    bonusConfirmations.value.forEach(c => {
+      if (c.status !== 'pending') return
+
+      const deadline = dayjs(c.deadlineAt)
+      const remainingHoursFloat = deadline.diff(now, 'hour', true)
+
+      let warningLevel: 'info' | 'warning' | 'critical' = 'info'
+      if (remainingHoursFloat <= 0) {
+        c.status = 'timeout'
+        c.timeoutNotifiedAt = now.format('YYYY-MM-DD HH:mm:ss')
+        warningLevel = 'critical'
+      } else if (remainingHoursFloat <= 24) {
+        warningLevel = 'critical'
+      } else if (remainingHoursFloat <= 72) {
+        warningLevel = 'warning'
+      }
+
+      if (remainingHoursFloat <= 72) {
+        warnings.push({
+          recordId: c.id,
+          employeeId: c.employeeId,
+          employeeName: c.employeeName,
+          departmentName: c.departmentName,
+          deadlineAt: c.deadlineAt,
+          remainingHours: remainingHoursFloat,
+          warningLevel,
+          status: c.status
+        })
+      }
+    })
+
+    bonusConfirmationBatches.value.forEach(b => {
+      if (b.status === 'published') {
+        updateBatchStats(b.id)
+      }
+    })
+
+    return warnings
+  }
+
+  function sendReminder(confirmationId: string): boolean {
+    const confirmation = bonusConfirmations.value.find(c => c.id === confirmationId)
+    if (!confirmation || confirmation.status !== 'pending') return false
+
+    confirmation.reminderCount += 1
+    confirmation.lastReminderAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    return true
+  }
+
+  function getTimeoutWarnings(): TimeoutWarning[] {
+    return checkTimeouts()
+  }
+
+  const pendingConfirmationsCount = computed(() =>
+    bonusConfirmations.value.filter(c => c.status === 'pending').length
+  )
+
+  const objectedConfirmationsCount = computed(() =>
+    bonusConfirmations.value.filter(c => c.status === 'objected' || c.status === 'reviewing').length
+  )
+
+  function exportConfirmationModuleData(): BonusConfirmationModuleData {
+    return {
+      batches: bonusConfirmationBatches.value,
+      confirmations: bonusConfirmations.value
+    }
+  }
+
+  function importConfirmationModuleData(data: BonusConfirmationModuleData): boolean {
+    try {
+      bonusConfirmationBatches.value = data.batches || []
+      bonusConfirmations.value = data.confirmations || []
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function initMockConfirmationData() {
+    const batch1 = createConfirmationBatch({
+      name: '2025年度年终奖确认',
+      year: 2025,
+      bonusName: '2025年度年终奖',
+      deadlineDays: 7
+    })
+
+    generateConfirmationsFromCalculation(batch1.id)
+    publishConfirmationBatch(batch1.id)
+
+    const confirmations = getConfirmationsByBatch(batch1.id)
+    if (confirmations.length > 0) {
+      signBonus(confirmations[0].id, '张三')
+
+      if (confirmations.length > 1) {
+        submitObjection(
+          confirmations[1].id,
+          '绩效系数争议',
+          '我认为我的绩效评级不准确，应该是A+而不是A，请复核。',
+          []
+        )
+        startReview(confirmations[1].id)
+      }
+
+      if (confirmations.length > 2) {
+        submitObjection(
+          confirmations[2].id,
+          '金额计算有误',
+          '我的基本工资计算有误，请核对。',
+          []
+        )
+      }
+    }
+  }
+
+  initMockConfirmationData()
+
   return {
     performanceLevels,
     employeeTags,
@@ -1626,6 +1994,33 @@ export const useBonusStore = defineStore('bonus', () => {
     saveCalibration,
     getCalibrationDistributionStats,
     exportData,
-    importData
+    importData,
+    bonusConfirmationBatches,
+    bonusConfirmations,
+    selectedConfirmationBatchId,
+    selectedConfirmationId,
+    CONFIRMATION_STATUS_LABELS,
+    CONFIRMATION_STATUS_COLORS,
+    pendingConfirmationsCount,
+    objectedConfirmationsCount,
+    getConfirmationStatusLabel,
+    getConfirmationStatusColor,
+    createConfirmationBatch,
+    updateConfirmationBatch,
+    deleteConfirmationBatch,
+    publishConfirmationBatch,
+    generateConfirmationsFromCalculation,
+    updateBatchStats,
+    getConfirmationsByBatch,
+    getConfirmationById,
+    signBonus,
+    submitObjection,
+    startReview,
+    completeReview,
+    checkTimeouts,
+    sendReminder,
+    getTimeoutWarnings,
+    exportConfirmationModuleData,
+    importConfirmationModuleData
   }
 })
