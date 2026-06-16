@@ -372,22 +372,35 @@ const previewData = computed(() => {
 
   const year = dayjs(form.effectiveDate).year()
   const emp = selectedEmployee.value
-  const bonusPool = bonusStore.bonusPool
+  const pool = bonusStore.bonusPool
+  const dept = bonusStore.getDepartmentById(emp.departmentId)
+  if (!dept) return null
 
-  const originalAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year)
-  const adjustedAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year, {
+  const pendingAdj = {
     effectiveDate: form.effectiveDate,
     oldSalary: form.currentSalary,
     newSalary: form.proposedSalary
-  })
+  }
 
-  const originalWeightedSalary = bonusStore.calculateWeightedBaseSalary(emp, year)
-  const adjustedWeightedSalary = round2(
-    (originalAnnualSalary + form.adjustmentAmount * (12 - dayjs(form.effectiveDate).month())) / 12
+  const originalResult = bonusStore.calculationResults.find(r => r.employeeId === emp.id)
+  if (!originalResult) return null
+
+  const originalBonus = originalResult.grossBonus
+  const originalTenureBonus = originalResult.tenureBonus
+
+  const currentDeptBaseTotal = dept.employees.reduce(
+    (sum, e) => sum + bonusStore.calculateEmployeeBaseAmount(e), 0
   )
 
-  const base = originalWeightedSalary * bonusPool.baseRatio
-  const adjustedBase = adjustedWeightedSalary * bonusPool.baseRatio
+  const currentEmpBaseAmount = bonusStore.calculateEmployeeBaseAmount(emp)
+  const adjustedEmpBaseAmount = bonusStore.calculateEmployeeBaseAmount(emp, true, pendingAdj)
+  const adjustedDeptBaseTotal = currentDeptBaseTotal - currentEmpBaseAmount + adjustedEmpBaseAmount
+
+  const deptAlloc = bonusStore.departmentAllocations[emp.departmentId] || 0
+  const adjustedScaleFactor = deptAlloc / adjustedDeptBaseTotal
+  const adjustedBonus = round2(adjustedEmpBaseAmount * adjustedScaleFactor)
+
+  const adjustedWeightedSalary = bonusStore.calculateWeightedBaseSalary(emp, year, pendingAdj)
 
   const empImpacts = bonusStore.getEmployeeImpacts(emp.id)
   const existingAdjustmentRatio = empImpacts.reduce((sum, imp) => {
@@ -396,31 +409,13 @@ const previewData = computed(() => {
     }
     return sum
   }, 0)
-
-  const originalTenureBonus = bonusStore.calculateAdjustedTenureBonus(emp, base, existingAdjustmentRatio)
+  const adjustedBase = adjustedWeightedSalary * pool.baseRatio
   const adjustedTenureBonus = bonusStore.calculateAdjustedTenureBonus(
-    emp,
-    adjustedBase,
-    existingAdjustmentRatio + form.adjustmentRatio
+    emp, adjustedBase, existingAdjustmentRatio + form.adjustmentRatio
   )
 
-  const performanceCoefficient = bonusStore.getPerformanceCoefficient(emp.performanceLevelId)
-  const originalPerformanceBonus = round2(base * performanceCoefficient * bonusPool.performanceRatio)
-  const adjustedPerformanceBonus = round2(adjustedBase * performanceCoefficient * bonusPool.performanceRatio)
-
-  const tagCoefficient = bonusStore.getTagCoefficient(emp.tagIds)
-  const originalTagBonus = round2(base * tagCoefficient)
-  const adjustedTagBonus = round2(adjustedBase * tagCoefficient)
-
-  const originalBaseAmount = round2(base + originalPerformanceBonus + originalTenureBonus + originalTagBonus)
-  const adjustedBaseAmount = round2(adjustedBase + adjustedPerformanceBonus + adjustedTenureBonus + adjustedTagBonus)
-
-  const deptAlloc = bonusStore.departmentAllocations[emp.departmentId] || 0
-  const deptBaseTotal = originalBaseAmount * 2
-  const scaleFactor = deptAlloc / deptBaseTotal
-
-  const originalBonus = round2(originalBaseAmount * scaleFactor)
-  const adjustedBonus = round2(adjustedBaseAmount * scaleFactor)
+  const originalAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year)
+  const adjustedAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year, pendingAdj)
 
   const originalSpecialDeduction = round2(originalAnnualSalary * 0.22)
   const adjustedSpecialDeduction = round2(adjustedAnnualSalary * 0.22)
@@ -449,7 +444,6 @@ const previewData = computed(() => {
 
   const originalTaxOneTime = round2(calculateOneTimeTax(originalBonus))
   const adjustedTaxOneTime = round2(calculateOneTimeTax(adjustedBonus))
-
   const adjustedTaxComprehensive = round2(adjustedCompResult.taxDifference)
 
   let betterMethod: 'oneTime' | 'comprehensive' = 'oneTime'
@@ -464,7 +458,6 @@ const previewData = computed(() => {
 
   const effectiveMonth = dayjs(form.effectiveDate).month()
   const effectiveMonths = 12 - effectiveMonth
-
   const tenureBoost = Math.min(form.adjustmentRatio * 0.5, 0.1)
 
   return {

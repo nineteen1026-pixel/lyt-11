@@ -826,15 +826,31 @@ export const useBonusStore = defineStore('bonus', () => {
     return salaryAdjustmentImpacts.value.filter((i) => i.id.startsWith(employeeId + '_'))
   }
 
-  function calculateWeightedBaseSalary(employee: Employee, year: number): number {
+  function calculateWeightedBaseSalary(employee: Employee, year: number, pendingAdjustment?: { effectiveDate: string; oldSalary: number; newSalary: number }): number {
     const allImpacts = getEmployeeImpacts(employee.id)
-    if (allImpacts.length === 0) {
-      return employee.baseSalary
-    }
-
-    const sortedImpacts = [...allImpacts].sort((a, b) =>
+    let sortedImpacts = [...allImpacts].sort((a, b) =>
       dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
     )
+
+    if (pendingAdjustment) {
+      sortedImpacts.push({
+        id: 'pending',
+        type: 'salary_adjustment',
+        name: '拟调薪',
+        description: '待审批调薪申请',
+        effectiveDate: pendingAdjustment.effectiveDate,
+        oldValue: pendingAdjustment.oldSalary,
+        newValue: pendingAdjustment.newSalary,
+        impactAmount: 0
+      })
+      sortedImpacts.sort((a, b) =>
+        dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
+      )
+    }
+
+    if (sortedImpacts.length === 0) {
+      return employee.baseSalary
+    }
 
     const yearImpacts = sortedImpacts.filter((i) => dayjs(i.effectiveDate).year() === year)
 
@@ -999,13 +1015,23 @@ export const useBonusStore = defineStore('bonus', () => {
     return map
   })
 
-  function calculateEmployeeBaseAmount(employee: Employee, useWeighted: boolean = true): number {
+  function calculateEmployeeBaseAmount(employee: Employee, useWeighted: boolean = true, pendingAdjustment?: { effectiveDate: string; oldSalary: number; newSalary: number }): number {
     const salary = useWeighted
-      ? calculateWeightedBaseSalary(employee, bonusCalculationYear.value)
+      ? calculateWeightedBaseSalary(employee, bonusCalculationYear.value, pendingAdjustment)
       : employee.baseSalary
     const base = salary * bonusPool.value.baseRatio
     const performance = base * getPerformanceCoefficient(employee.performanceLevelId) * bonusPool.value.performanceRatio
-    const tenure = base * Math.min(employee.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
+    const empImpacts = getEmployeeImpacts(employee.id)
+    let totalAdjustmentRatio = empImpacts.reduce((sum, imp) => {
+      if (imp.oldValue > 0) {
+        return sum + ((imp.newValue - imp.oldValue) / imp.oldValue)
+      }
+      return sum
+    }, 0)
+    if (pendingAdjustment && pendingAdjustment.oldSalary > 0) {
+      totalAdjustmentRatio += (pendingAdjustment.newSalary - pendingAdjustment.oldSalary) / pendingAdjustment.oldSalary
+    }
+    const tenure = calculateAdjustedTenureBonus(employee, base, totalAdjustmentRatio)
     const tagBonus = base * getTagCoefficient(employee.tagIds)
     return round2(base + performance + tenure + tagBonus)
   }
