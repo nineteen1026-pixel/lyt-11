@@ -316,6 +316,7 @@ import type {
 } from '@/types'
 import dayjs from 'dayjs'
 import EmployeeReviewDetail from './EmployeeReviewDetail.vue'
+import { loadChineseFont, getFontName } from '@/utils/chineseFont'
 
 const store = useSalaryAdjustmentStore()
 const bonusStore = useBonusStore()
@@ -562,217 +563,306 @@ async function handleExportPdf() {
     return
   }
 
-  message.loading('正在生成PDF报告，请稍候...')
+  const loadingMsg = message.loading('正在加载中文字体并生成PDF报告，请稍候...', { duration: 0 })
 
-  const jsPDF = (await import('jspdf')).default
-  const html2canvas = (await import('html2canvas')).default
+  try {
+    const jsPDF = (await import('jspdf')).default
+    await import('jspdf-autotable')
 
-  const doc = new jsPDF('p', 'mm', 'a4')
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const margin = 15
-  const contentWidth = pageWidth - margin * 2
+    const doc = new jsPDF('p', 'mm', 'a4')
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const fontName = getFontName()
 
-  let y = margin
+    // 加载中文字体
+    await loadChineseFont(doc)
 
-  const renderSection = async (content: string): Promise<void> => {
-    const container = document.createElement('div')
-    container.style.cssText = `
-      position: absolute;
-      left: -9999px;
-      top: 0;
-      width: ${contentWidth * 3.78}px;
-      font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-      background: white;
-      padding: 20px;
-    `
-    container.innerHTML = content
-    document.body.appendChild(container)
+    let y = 20
 
-    try {
-      const canvas = await html2canvas(container, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
+    // 标题
+    doc.setFontSize(18)
+    doc.setTextColor('#1f2329')
+    doc.text(`${selectedYear.value}年度薪酬包复盘报告`, pageWidth / 2, y, { align: 'center' })
+    y += 8
+
+    // 副标题
+    doc.setFontSize(10)
+    doc.setTextColor('#8c8c8c')
+    const scopeText = report.value.scope === 'company' ? '全公司' : report.value.scopeName || '未知'
+    doc.text(`统计范围：${scopeText}`, pageWidth / 2, y, { align: 'center' })
+    y += 5
+    doc.text(`生成时间：${dayjs().format('YYYY年MM月DD日 HH:mm:ss')}`, pageWidth / 2, y, { align: 'center' })
+    y += 12
+
+    // 一、薪酬总览
+    if (report.value.companySummary) {
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('一、薪酬总览', 15, y)
+      y += 8
+
+      const summary = report.value.companySummary
+      const summaryData: any[][] = [
+        ['员工总数', `${summary.totalHeadcount} 人`],
+        ['年度薪资总额', formatMoney(summary.totalAnnualSalary)],
+        ['年度奖金总额', formatMoney(summary.totalBonusGross)],
+        ['年度薪酬总包', formatMoney(summary.totalCompensation)],
+        ['平均月薪', formatMoney(summary.averageSalary)],
+        ['平均奖金', formatMoney(summary.averageBonus)],
+        ['整体薪资增长率', `+${(summary.overallSalaryGrowth * 100).toFixed(2)}%`]
+      ]
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['指标', '数值']],
+        body: summaryData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 10,
+          font: fontName,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 10,
+          font: fontName,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 70 },
+          1: { width: 100 }
+        },
+        margin: { left: 15, right: 15 }
       })
 
-      const imgData = canvas.toDataURL('image/png')
-      const imgWidth = contentWidth
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
 
-      if (y + imgHeight > pageHeight - margin) {
-        doc.addPage()
-        y = margin
+    // 二、调薪事由分布
+    if (report.value.salaryAdjustmentByCategory) {
+      const adjData: any[][] = Object.entries(report.value.salaryAdjustmentByCategory)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => [store.getCategoryLabel(k as AdjustmentReasonCategory), formatMoney(v)])
+
+      if (adjData.length > 0) {
+        doc.setFontSize(12)
+        doc.setTextColor('#262626')
+        doc.text('二、调薪事由分布', 15, y)
+        y += 8
+
+        ;(doc as any).autoTable({
+          startY: y,
+          head: [['调薪事由', '调薪金额']],
+          body: adjData,
+          theme: 'striped',
+          headStyles: {
+            fillColor: '#f0f5ff',
+            textColor: '#595959',
+            fontSize: 10,
+            font: fontName,
+            fontStyle: 'bold'
+          },
+          bodyStyles: {
+            fontSize: 10,
+            font: fontName,
+            textColor: '#262626'
+          },
+          columnStyles: {
+            0: { width: 80 },
+            1: { width: 90 }
+          },
+          margin: { left: 15, right: 15 }
+        })
+
+        y = (doc as any).lastAutoTable.finalY + 10
       }
-
-      doc.addImage(imgData, 'PNG', margin, y, imgWidth, imgHeight)
-      y += imgHeight + 5
-    } finally {
-      document.body.removeChild(container)
     }
-  }
 
-  const summary = report.value.companySummary
-  if (summary) {
-    await renderSection(`
-      <div style="font-size: 24px; font-weight: bold; margin-bottom: 20px; text-align: center;">
-        ${selectedYear.value}年度薪酬包复盘报告
-      </div>
-      <div style="font-size: 14px; color: #666; margin-bottom: 20px; text-align: center;">
-        统计范围：${report.value.scope === 'company' ? '全公司' : report.value.scopeName || '未知'} |
-        生成时间：${dayjs().format('YYYY年MM月DD日 HH:mm:ss')}
-      </div>
-      <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-        一、薪酬总览
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-        <tr style="background: #f0f5ff;">
-          <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: left;">指标</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">数值</th>
-        </tr>
-        <tr><td style="border: 1px solid #e8e8e8; padding: 10px;">员工总数</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${summary.totalHeadcount} 人</td></tr>
-        <tr style="background: #fafafa;"><td style="border: 1px solid #e8e8e8; padding: 10px;">年度薪资总额</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${formatMoney(summary.totalAnnualSalary)}</td></tr>
-        <tr><td style="border: 1px solid #e8e8e8; padding: 10px;">年度奖金总额</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${formatMoney(summary.totalBonusGross)}</td></tr>
-        <tr style="background: #fff7e6;"><td style="border: 1px solid #e8e8e8; padding: 10px; font-weight: bold;">年度薪酬总包</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right; font-weight: bold; color: #fa8c16;">${formatMoney(summary.totalCompensation)}</td></tr>
-        <tr><td style="border: 1px solid #e8e8e8; padding: 10px;">平均月薪</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${formatMoney(summary.averageSalary)}</td></tr>
-        <tr style="background: #fafafa;"><td style="border: 1px solid #e8e8e8; padding: 10px;">平均奖金</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${formatMoney(summary.averageBonus)}</td></tr>
-        <tr><td style="border: 1px solid #e8e8e8; padding: 10px;">整体薪资增长率</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right; color: #52c41a; font-weight: bold;">+${(summary.overallSalaryGrowth * 100).toFixed(2)}%</td></tr>
-      </table>
-    `)
-  }
+    // 三、绩效等级分布
+    if (report.value.companySummary?.performanceDistribution) {
+      const perfData: any[][] = Object.entries(report.value.companySummary.performanceDistribution)
+        .map(([level, count]) => [level, `${count} 人`])
 
-  if (report.value.salaryAdjustmentByCategory) {
-    const adjItems = Object.entries(report.value.salaryAdjustmentByCategory)
-      .filter(([, v]) => v > 0)
-      .map(([k, v]) => `<tr><td style="border: 1px solid #e8e8e8; padding: 10px;">${store.getCategoryLabel(k as AdjustmentReasonCategory)}</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${formatMoney(v)}</td></tr>`)
-      .join('')
+      if (perfData.length > 0) {
+        doc.setFontSize(12)
+        doc.setTextColor('#262626')
+        doc.text('三、绩效等级分布', 15, y)
+        y += 8
 
-    if (adjItems) {
-      await renderSection(`
-        <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-          二、调薪事由分布
-        </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-          <tr style="background: #f0f5ff;">
-            <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: left;">调薪事由</th>
-            <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">调薪金额</th>
-          </tr>
-          ${adjItems}
-        </table>
-      `)
+        ;(doc as any).autoTable({
+          startY: y,
+          head: [['绩效等级', '人数']],
+          body: perfData,
+          theme: 'striped',
+          headStyles: {
+            fillColor: '#f0f5ff',
+            textColor: '#595959',
+            fontSize: 10,
+            font: fontName,
+            fontStyle: 'bold'
+          },
+          bodyStyles: {
+            fontSize: 10,
+            font: fontName,
+            textColor: '#262626'
+          },
+          columnStyles: {
+            0: { width: 60 },
+            1: { width: 110 }
+          },
+          margin: { left: 15, right: 15 }
+        })
+
+        y = (doc as any).lastAutoTable.finalY + 10
+      }
     }
-  }
 
-  if (report.value.companySummary?.performanceDistribution) {
-    const perfItems = Object.entries(report.value.companySummary.performanceDistribution)
-      .map(([level, count]) => `<tr><td style="border: 1px solid #e8e8e8; padding: 10px; font-weight: bold;">${level}</td><td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">${count} 人</td></tr>`)
-      .join('')
+    // 四、薪资增长 TOP5
+    if (report.value.topSalaryGrowth && report.value.topSalaryGrowth.length > 0) {
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('四、薪资增长 TOP5', 15, y)
+      y += 8
 
-    if (perfItems) {
-      await renderSection(`
-        <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-          三、绩效等级分布
-        </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-          <tr style="background: #f0f5ff;">
-            <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: left;">绩效等级</th>
-            <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">人数</th>
-          </tr>
-          ${perfItems}
-        </table>
-      `)
+      const topGrowthData: any[][] = report.value.topSalaryGrowth.map((emp, i) => [
+        `${i + 1}`,
+        emp.employeeName,
+        emp.departmentName || '-',
+        `+${(emp.salaryGrowthRate * 100).toFixed(2)}%`
+      ])
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['排名', '姓名', '部门', '增长率']],
+        body: topGrowthData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 10,
+          font: fontName,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 9,
+          font: fontName,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 20, halign: 'center' },
+          1: { width: 50 },
+          2: { width: 70 },
+          3: { width: 40, halign: 'right' }
+        },
+        margin: { left: 15, right: 15 }
+      })
+
+      y = (doc as any).lastAutoTable.finalY + 10
     }
+
+    // 五、奖金收入 TOP5
+    if (report.value.topBonusEarners && report.value.topBonusEarners.length > 0) {
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('五、奖金收入 TOP5', 15, y)
+      y += 8
+
+      const topBonusData: any[][] = report.value.topBonusEarners.map((emp, i) => [
+        `${i + 1}`,
+        emp.employeeName,
+        emp.departmentName || '-',
+        formatMoney(emp.summary.totalBonusGross)
+      ])
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['排名', '姓名', '部门', '奖金总额']],
+        body: topBonusData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 10,
+          font: fontName,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 9,
+          font: fontName,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 20, halign: 'center' },
+          1: { width: 50 },
+          2: { width: 70 },
+          3: { width: 50, halign: 'right' }
+        },
+        margin: { left: 15, right: 15 }
+      })
+
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
+
+    // 六、员工薪酬明细
+    if (report.value.employees && report.value.employees.length > 0) {
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('六、员工薪酬明细', 15, y)
+      y += 8
+
+      const empData: any[][] = report.value.employees.map((emp) => [
+        emp.employeeName,
+        emp.departmentName || '-',
+        emp.position || '-',
+        formatMoney(emp.endSalary || 0),
+        `${(emp.salaryGrowthRate || 0) >= 0 ? '+' : ''}${((emp.salaryGrowthRate || 0) * 100).toFixed(2)}%`,
+        formatMoney(emp.summary?.totalBonusGross || 0),
+        formatMoney(emp.summary?.totalCompensationGross || 0),
+        emp.summary?.highestPerformanceLevel || '-'
+      ])
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['姓名', '部门', '职位', '年末月薪', '增长率', '年度奖金', '年度总包', '最高绩效']],
+        body: empData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 8,
+          font: fontName,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 7,
+          font: fontName,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 25 },
+          1: { width: 30 },
+          2: { width: 30 },
+          3: { width: 35, halign: 'right' },
+          4: { width: 25, halign: 'right' },
+          5: { width: 35, halign: 'right' },
+          6: { width: 35, halign: 'right' },
+          7: { width: 25, halign: 'center' }
+        },
+        margin: { left: 10, right: 10 },
+        styles: {
+          cellPadding: 2
+        }
+      })
+    }
+
+    doc.save(`${selectedYear.value}年度薪酬包复盘报告_${dayjs().format('YYYYMMDD')}.pdf`)
+    message.success('PDF报告已导出')
+  } catch (error) {
+    console.error('PDF导出失败:', error)
+    message.error('PDF导出失败，请重试')
+  } finally {
+    loadingMsg.destroy()
   }
-
-  if (report.value.topSalaryGrowth && report.value.topSalaryGrowth.length > 0) {
-    const topGrowthItems = report.value.topSalaryGrowth.map((emp, i) => `
-      <tr>
-        <td style="border: 1px solid #e8e8e8; padding: 10px; text-align: center; font-weight: bold; color: ${i < 3 ? '#fa8c16' : '#666'};">${i + 1}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px;">${emp.employeeName}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px;">${emp.departmentName || '-'}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right; color: #52c41a; font-weight: bold;">+${(emp.salaryGrowthRate * 100).toFixed(2)}%</td>
-      </tr>
-    `).join('')
-
-    await renderSection(`
-      <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-        四、薪资增长 TOP5
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-        <tr style="background: #f0f5ff;">
-          <th style="border: 1px solid #e8e8e8; padding: 10px; width: 40px;">排名</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px;">姓名</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px;">部门</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">增长率</th>
-        </tr>
-        ${topGrowthItems}
-      </table>
-    `)
-  }
-
-  if (report.value.topBonusEarners && report.value.topBonusEarners.length > 0) {
-    const topBonusItems = report.value.topBonusEarners.map((emp, i) => `
-      <tr>
-        <td style="border: 1px solid #e8e8e8; padding: 10px; text-align: center; font-weight: bold; color: ${i < 3 ? '#fa8c16' : '#666'};">${i + 1}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px;">${emp.employeeName}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px;">${emp.departmentName || '-'}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 10px; text-align: right; color: #52c41a; font-weight: bold;">${formatMoney(emp.summary.totalBonusGross)}</td>
-      </tr>
-    `).join('')
-
-    await renderSection(`
-      <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-        五、奖金收入 TOP5
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-        <tr style="background: #f0f5ff;">
-          <th style="border: 1px solid #e8e8e8; padding: 10px; width: 40px;">排名</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px;">姓名</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px;">部门</th>
-          <th style="border: 1px solid #e8e8e8; padding: 10px; text-align: right;">奖金总额</th>
-        </tr>
-        ${topBonusItems}
-      </table>
-    `)
-  }
-
-  if (report.value.employees && report.value.employees.length > 0) {
-    const empItems = report.value.employees.map((emp) => `
-      <tr>
-        <td style="border: 1px solid #e8e8e8; padding: 8px;">${emp.employeeName}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px;">${emp.departmentName || '-'}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px;">${emp.position || '-'}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px; text-align: right;">${formatMoney(emp.endSalary || 0)}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px; text-align: right; color: ${(emp.salaryGrowthRate || 0) >= 0 ? '#52c41a' : '#f5222d'}; font-weight: bold;">${(emp.salaryGrowthRate || 0) >= 0 ? '+' : ''}${((emp.salaryGrowthRate || 0) * 100).toFixed(2)}%</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px; text-align: right; color: #52c41a; font-weight: bold;">${formatMoney(emp.summary?.totalBonusGross || 0)}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px; text-align: right; color: #fa8c16; font-weight: bold;">${formatMoney(emp.summary?.totalCompensationGross || 0)}</td>
-        <td style="border: 1px solid #e8e8e8; padding: 8px; text-align: center; font-weight: bold;">${emp.summary?.highestPerformanceLevel || '-'}</td>
-      </tr>
-    `).join('')
-
-    await renderSection(`
-      <div style="font-size: 18px; font-weight: bold; margin: 20px 0 15px 0; border-bottom: 2px solid #1890ff; padding-bottom: 8px;">
-        六、员工薪酬明细
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-        <tr style="background: #f0f5ff;">
-          <th style="border: 1px solid #e8e8e8; padding: 8px;">姓名</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px;">部门</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px;">职位</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px; text-align: right;">年末月薪</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px; text-align: right;">增长率</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px; text-align: right;">年度奖金</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px; text-align: right;">年度总包</th>
-          <th style="border: 1px solid #e8e8e8; padding: 8px; text-align: center;">最高绩效</th>
-        </tr>
-        ${empItems}
-      </table>
-    `)
-  }
-
-  doc.save(`${selectedYear.value}年度薪酬包复盘报告_${dayjs().format('YYYYMMDD')}.pdf`)
-  message.success('PDF报告已导出')
 }
 
 function handleExportJson() {
