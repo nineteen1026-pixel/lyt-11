@@ -92,7 +92,7 @@
     <n-card v-if="record && record.objection" title="异议信息">
       <n-descriptions :column="2" bordered>
         <n-descriptions-item label="异议原因">
-          <n-tag type="error" bordered={false}>{{ record.objection.reason }}</n-tag>
+          <n-tag type="error" :bordered="false">{{ record.objection.reason }}</n-tag>
         </n-descriptions-item>
         <n-descriptions-item label="申诉人">
           {{ record.objection.objectorName }}
@@ -102,6 +102,14 @@
         </n-descriptions-item>
         <n-descriptions-item label="详细描述" :span="2">
           <n-text>{{ record.objection.description }}</n-text>
+        </n-descriptions-item>
+        <n-descriptions-item v-if="record.objection.attachments && record.objection.attachments.length > 0" label="附件" :span="2">
+          <n-space vertical :size="4">
+            <n-space v-for="(file, idx) in record.objection.attachments" :key="idx" align="center">
+              <n-icon><PaperClipOutlined /></n-icon>
+              <n-text>{{ file }}</n-text>
+            </n-space>
+          </n-space>
         </n-descriptions-item>
       </n-descriptions>
     </n-card>
@@ -170,7 +178,7 @@
       </n-space>
     </n-modal>
 
-    <n-modal v-model:show="showObjectionModal" preset="dialog" title="提出异议申诉" :positive-text="'提交申诉'" :negative-text="'取消'" @positive-click="handleObjection">
+    <n-modal v-model:show="showObjectionModal" preset="dialog" title="提出异议申诉" :positive-text="'提交申诉'" :negative-text="'取消'" @positive-click="handleObjection" @after-leave="clearObjectionForm">
       <n-form ref="objectionFormRef" :model="objectionForm" :rules="objectionRules" label-placement="top">
         <n-form-item label="异议原因" path="reason">
           <n-select v-model:value="objectionForm.reason" :options="objectionReasons" placeholder="请选择异议原因" />
@@ -180,17 +188,20 @@
         </n-form-item>
         <n-form-item label="附件证明">
           <n-upload
+            v-model:file-list="objectionForm.fileList"
             :show-file-list="true"
             multiple
             :max="5"
             :custom-request="() => {}"
             @before-upload="handleUpload"
+            @remove="handleRemoveFile"
           >
             <n-button>
               <template #icon><UploadOutlined /></template>
               上传附件
             </n-button>
           </n-upload>
+          <n-text depth="3" style="font-size: 12px">最多上传 5 个附件</n-text>
         </n-form-item>
       </n-form>
     </n-modal>
@@ -205,9 +216,11 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
-  UploadOutlined
+  UploadOutlined,
+  PaperClipOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
+import type { UploadFileInfo } from 'naive-ui'
 
 const props = defineProps<{
   recordId: string
@@ -231,7 +244,8 @@ const agreedTerms = ref(false)
 const objectionFormRef = ref()
 const objectionForm = ref({
   reason: '',
-  description: ''
+  description: '',
+  fileList: [] as UploadFileInfo[]
 })
 
 const objectionReasons: SelectOption[] = [
@@ -300,16 +314,16 @@ function handleObjection() {
         positiveText: '确认提交',
         negativeText: '取消',
         onPositiveClick: () => {
+          const attachments = objectionForm.value.fileList.map(f => f.name)
           const ok = store.submitObjection(
             props.recordId,
             objectionForm.value.reason,
             objectionForm.value.description,
-            []
+            attachments
           )
           if (ok) {
             message.success('异议已提交，等待复核')
             showObjectionModal.value = false
-            objectionForm.value = { reason: '', description: '' }
             emit('objected')
           } else {
             message.error('提交失败')
@@ -320,8 +334,28 @@ function handleObjection() {
   })
 }
 
-function handleUpload({ file }: { file: File }) {
-  message.info(`已选择文件：${file.name}`)
+function clearObjectionForm() {
+  objectionForm.value = {
+    reason: '',
+    description: '',
+    fileList: []
+  }
+}
+
+function handleUpload({ file }: { file: UploadFileInfo }) {
+  if (objectionForm.value.fileList.length >= 5) {
+    message.warning('最多只能上传 5 个附件')
+    return false
+  }
+  objectionForm.value.fileList.push({
+    id: file.id || Date.now().toString(),
+    name: file.name,
+    status: 'finished'
+  })
   return false
+}
+
+function handleRemoveFile({ file }: { file: UploadFileInfo }) {
+  objectionForm.value.fileList = objectionForm.value.fileList.filter(f => f.id !== file.id)
 }
 </script>

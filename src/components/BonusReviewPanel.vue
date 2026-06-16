@@ -82,7 +82,7 @@
         <n-card title="异议信息" size="small">
           <n-descriptions :column="2" bordered>
             <n-descriptions-item label="异议原因">
-              <n-tag type="error" bordered={false}>{{ selectedRecord.objection?.reason }}</n-tag>
+              <n-tag type="error" :bordered="false">{{ selectedRecord.objection?.reason }}</n-tag>
             </n-descriptions-item>
             <n-descriptions-item label="申诉人">
               {{ selectedRecord.objection?.objectorName }}
@@ -92,6 +92,14 @@
             </n-descriptions-item>
             <n-descriptions-item label="详细描述" :span="2">
               <n-text>{{ selectedRecord.objection?.description }}</n-text>
+            </n-descriptions-item>
+            <n-descriptions-item v-if="selectedRecord.objection?.attachments && selectedRecord.objection.attachments.length > 0" label="附件" :span="2">
+              <n-space vertical :size="4">
+                <n-space v-for="(file, idx) in selectedRecord.objection.attachments" :key="idx" align="center">
+                  <n-icon><PaperClipOutlined /></n-icon>
+                  <n-text>{{ file }}</n-text>
+                </n-space>
+              </n-space>
             </n-descriptions-item>
           </n-descriptions>
         </n-card>
@@ -145,7 +153,7 @@
 import { ref, computed, h } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import { EyeOutlined, AuditOutlined } from '@vicons/antd'
+import { EyeOutlined, AuditOutlined, PaperClipOutlined } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import type { BonusConfirmationRecord } from '@/types'
 import { calculateOneTimeTax, round2 } from '@/utils/tax'
