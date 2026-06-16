@@ -1493,14 +1493,77 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       report.scopeName = dept?.name || '未知部门'
       report.departments = buildDepartmentAnnualReview(scopeId, year) ? [buildDepartmentAnnualReview(scopeId, year)!] : []
       const deptEmps = dept?.employees || []
-      report.employees = deptEmps
+      const reviews = deptEmps
         .map((e) => buildEmployeeAnnualReview(e.id, year))
         .filter((r): r is EmployeeAnnualReview => r !== null)
+      report.employees = reviews
+
+      const totalAnnualSalary = reviews.reduce((sum, r) => sum + r.summary.totalBaseSalaryAnnual, 0)
+      const totalBonusGross = reviews.reduce((sum, r) => sum + r.summary.totalBonusGross, 0)
+      const totalCompensation = reviews.reduce((sum, r) => sum + r.summary.totalCompensationGross, 0)
+      const avgSalary = reviews.length > 0 ? totalAnnualSalary / reviews.length / 12 : 0
+      const avgBonus = reviews.length > 0 ? totalBonusGross / reviews.length : 0
+      const growthRates = reviews.map((r) => r.salaryGrowthRate)
+      const overallGrowth = growthRates.length > 0 ? growthRates.reduce((a, b) => a + b, 0) / growthRates.length : 0
+      const perfDist: Record<string, number> = {}
+      reviews.forEach((r) => {
+        const level = r.summary.highestPerformanceLevel
+        if (level && level !== '-') perfDist[level] = (perfDist[level] || 0) + 1
+      })
+
+      const deptEmpIds = new Set(deptEmps.map((e) => e.id))
+      const adjByCategory: Record<AdjustmentReasonCategory, number> = {
+        annual: 0, performance: 0, promotion: 0, market: 0, certification: 0, transfer: 0, special: 0
+      }
+      salaryHistory.value
+        .filter((h) => dayjs(h.effectiveDate).year() === year && deptEmpIds.has(h.employeeId))
+        .forEach((h) => {
+          adjByCategory[h.reasonCategory] = (adjByCategory[h.reasonCategory] || 0) + h.adjustmentAmount
+        })
+
+      report.companySummary = {
+        totalHeadcount: deptEmps.length,
+        totalAnnualSalary: round2(totalAnnualSalary),
+        totalBonusGross: round2(totalBonusGross),
+        totalCompensation: round2(totalCompensation),
+        averageSalary: round2(avgSalary),
+        averageBonus: round2(avgBonus),
+        overallSalaryGrowth: round2(overallGrowth),
+        performanceDistribution: perfDist
+      }
+      report.salaryAdjustmentByCategory = adjByCategory
+      report.topSalaryGrowth = [...reviews].sort((a, b) => b.salaryGrowthRate - a.salaryGrowthRate).slice(0, 5)
+      report.topBonusEarners = [...reviews].sort((a, b) => b.summary.totalBonusGross - a.summary.totalBonusGross).slice(0, 5)
     } else if (scope === 'employee' && scopeId) {
       const review = buildEmployeeAnnualReview(scopeId, year)
       if (review) {
         report.scopeName = review.employeeName
         report.employees = [review]
+
+        const perfDist: Record<string, number> = {}
+        const level = review.summary.highestPerformanceLevel
+        if (level && level !== '-') perfDist[level] = 1
+
+        const adjByCategory: Record<AdjustmentReasonCategory, number> = {
+          annual: 0, performance: 0, promotion: 0, market: 0, certification: 0, transfer: 0, special: 0
+        }
+        salaryHistory.value
+          .filter((h) => dayjs(h.effectiveDate).year() === year && h.employeeId === scopeId)
+          .forEach((h) => {
+            adjByCategory[h.reasonCategory] = (adjByCategory[h.reasonCategory] || 0) + h.adjustmentAmount
+          })
+
+        report.companySummary = {
+          totalHeadcount: 1,
+          totalAnnualSalary: review.summary.totalBaseSalaryAnnual,
+          totalBonusGross: review.summary.totalBonusGross,
+          totalCompensation: review.summary.totalCompensationGross,
+          averageSalary: review.endSalary,
+          averageBonus: review.summary.totalBonusGross,
+          overallSalaryGrowth: review.salaryGrowthRate,
+          performanceDistribution: perfDist
+        }
+        report.salaryAdjustmentByCategory = adjByCategory
       }
     }
 

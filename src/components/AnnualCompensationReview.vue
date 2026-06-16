@@ -134,7 +134,7 @@
       <n-grid :cols="2" :x-gap="16">
         <n-gi>
           <n-card title="调薪事由分布">
-            <template v-if="adjustmentByCategory && Object.keys(adjustmentByCategory).length > 0">
+            <template v-if="adjustedAdjustmentByCategory && Object.keys(adjustedAdjustmentByCategory).length > 0">
               <n-space vertical :size="12" style="width: 100%">
                 <div
                   v-for="item in categoryList"
@@ -143,7 +143,7 @@
                 >
                   <n-space justify="space-between" align="center" style="width: 100%">
                     <n-space align="center">
-                      <n-tag :color="getCategoryColor(item.category)" size="small" bordered>
+                      <n-tag :type="getCategoryColorType(item.category)" size="small" bordered>
                         {{ store.getCategoryLabel(item.category) }}
                       </n-tag>
                     </n-space>
@@ -180,7 +180,7 @@
                   <n-space justify="space-between" align="center" style="width: 100%">
                     <n-space align="center">
                       <n-tag
-                        :color="store.getPerformanceLevelColor(item.level)"
+                        :type="getPerformanceLevelColorType(item.level)"
                         size="small"
                         bordered
                       >
@@ -303,15 +303,15 @@
                     {{ row.salaryGrowthRate >= 0 ? '+' : '' }}{{ (row.salaryGrowthRate * 100).toFixed(2) }}%
                   </span>
                 </td>
-                <td style="text-align: right">{{ formatMoney(row.summary.totalBonusGross) }}</td>
-                <td style="text-align: right; font-weight: 600">{{ formatMoney(row.summary.totalCompensationGross) }}</td>
+                <td style="text-align: right; color: #52c41a; font-weight: 600">{{ formatMoney(row.summary?.totalBonusGross || 0) }}</td>
+                <td style="text-align: right; font-weight: 700; color: #fa8c16">{{ formatMoney(row.summary?.totalCompensationGross || 0) }}</td>
                 <td style="text-align: center">
                   <n-tag
-                    :color="store.getPerformanceLevelColor(row.summary.highestPerformanceLevel)"
+                    :type="getPerformanceLevelColorType(row.summary?.highestPerformanceLevel || '-')"
                     size="small"
                     bordered
                   >
-                    {{ row.summary.highestPerformanceLevel }}
+                    {{ row.summary?.highestPerformanceLevel || '-' }}
                   </n-tag>
                 </td>
               </tr>
@@ -329,7 +329,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, h } from 'vue'
-import { useMessage, type DataTableColumns } from 'naive-ui'
+import { useMessage, type DataTableColumns, NTag } from 'naive-ui'
 import {
   PrinterOutlined,
   FileTextOutlined
@@ -338,7 +338,8 @@ import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import { useBonusStore } from '@/stores/bonus'
 import type {
   AnnualCompensationReviewReport,
-  AdjustmentReasonCategory
+  AdjustmentReasonCategory,
+  EmployeeAnnualReview
 } from '@/types'
 import dayjs from 'dayjs'
 import EmployeeReviewDetail from './EmployeeReviewDetail.vue'
@@ -397,12 +398,25 @@ const adjustmentByCategory = computed<Partial<Record<AdjustmentReasonCategory, n
 
 const performanceDistribution = computed<Record<string, number>>(() => {
   if (report.value?.companySummary) {
-    return report.value.companySummary.performanceDistribution as Record<string, number>
+    return report.value.companySummary.performanceDistribution as Record<string, number> || {}
   }
   if (report.value?.departments && report.value.departments.length > 0) {
-    return report.value.departments[0].performanceDistribution as Record<string, number>
+    return report.value.departments[0].performanceDistribution as Record<string, number> || {}
   }
   return {}
+})
+
+const adjustedAdjustmentByCategory = computed(() => {
+  if (!report.value?.salaryAdjustmentByCategory) return {}
+  const category = report.value.salaryAdjustmentByCategory
+  const filtered: Record<string, number> = {}
+  Object.keys(category).forEach((key) => {
+    const value = category[key as AdjustmentReasonCategory]
+    if (value !== undefined && value > 0) {
+      filtered[key] = value
+    }
+  })
+  return filtered
 })
 
 const categoryList = computed(() => {
@@ -465,15 +479,40 @@ const departmentColumns: DataTableColumns<any> = [
   }
 ]
 
-const employeeColumns: DataTableColumns<any> = [
+const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
   { title: '姓名', key: 'employeeName', width: 100 },
   { title: '部门', key: 'departmentName', width: 120 },
   { title: '职位', key: 'position', width: 120 },
-  { title: '年末月薪', key: 'endSalary', width: 120, align: 'right' },
-  { title: '薪资增长率', key: 'salaryGrowthRate', width: 110, align: 'right' },
-  { title: '年度奖金', key: 'totalBonusGross', width: 130, align: 'right' },
-  { title: '年度总包', key: 'totalCompensationGross', width: 140, align: 'right' },
-  { title: '最高绩效', key: 'highestPerformanceLevel', width: 100, align: 'center' }
+  {
+    title: '年末月薪',
+    key: 'endSalary',
+    width: 120,
+    align: 'right'
+  },
+  {
+    title: '薪资增长率',
+    key: 'salaryGrowthRate',
+    width: 110,
+    align: 'right'
+  },
+  {
+    title: '年度奖金',
+    key: 'bonus',
+    width: 130,
+    align: 'right'
+  },
+  {
+    title: '年度总包',
+    key: 'compensation',
+    width: 140,
+    align: 'right'
+  },
+  {
+    title: '最高绩效',
+    key: 'performance',
+    width: 100,
+    align: 'center'
+  }
 ]
 
 function formatMoney(n: number): string {
@@ -493,33 +532,335 @@ function getCategoryColor(category: AdjustmentReasonCategory): string {
   return colors[category] || '#8c8c8c'
 }
 
-function handleYearChange() {
+function getCategoryColorType(category: AdjustmentReasonCategory): 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default' {
+  const types: Record<AdjustmentReasonCategory, 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default'> = {
+    annual: 'primary',
+    performance: 'success',
+    promotion: 'warning',
+    market: 'info',
+    certification: 'warning',
+    transfer: 'error',
+    special: 'error'
+  }
+  return types[category] || 'default'
 }
 
-function handleExportPdf() {
+function getPerformanceLevelColorType(level: string): 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default' {
+  const types: Record<string, 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default'> = {
+    S: 'success',
+    'A+': 'success',
+    A: 'primary',
+    'B+': 'info',
+    B: 'info',
+    C: 'error'
+  }
+  return types[level] || 'default'
+}
+
+function handleYearChange() {}
+
+async function handleExportPdf() {
   if (!report.value) {
     message.warning('报告尚未生成')
     return
   }
 
-  const html = store.exportReviewReportHtml(report.value)
-  const printWindow = window.open('', '_blank')
-  if (!printWindow) {
-    message.error('无法打开打印窗口，请检查浏览器弹窗拦截设置')
-    return
+  const jsPDF = await import('jspdf').then(m => m.default)
+  await import('jspdf-autotable')
+
+  const doc = new jsPDF('p', 'mm', 'a4')
+  const pageWidth = doc.internal.pageSize.getWidth()
+  let y = 20
+
+  doc.setFont('sans-serif', 'bold')
+  doc.setFontSize(18)
+  doc.setTextColor('#1f2329')
+  doc.text(`${selectedYear.value}年度薪酬包复盘报告`, pageWidth / 2, y, { align: 'center' })
+  y += 10
+
+  doc.setFont('sans-serif', 'normal')
+  doc.setFontSize(10)
+  doc.setTextColor('#8c8c8c')
+  doc.text(`统计范围：${report.value.scope === 'company' ? '全公司' : report.value.scopeName || '未知'}`, pageWidth / 2, y, { align: 'center' })
+  y += 5
+  doc.text(`生成时间：${dayjs().format('YYYY年MM月DD日 HH:mm:ss')}`, pageWidth / 2, y, { align: 'center' })
+  y += 15
+
+  if (report.value.companySummary) {
+    doc.setFont('sans-serif', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor('#262626')
+    doc.text('一、薪酬总览', 15, y)
+    y += 10
+
+    const summary = report.value.companySummary
+    const summaryData = [
+      ['员工总数', `${summary.totalHeadcount} 人`],
+      ['年度薪资总额', formatMoney(summary.totalAnnualSalary)],
+      ['年度奖金总额', formatMoney(summary.totalBonusGross)],
+      ['年度薪酬总包', formatMoney(summary.totalCompensation)],
+      ['平均月薪', formatMoney(summary.averageSalary)],
+      ['平均奖金', formatMoney(summary.averageBonus)],
+      ['整体薪资增长率', `+${(summary.overallSalaryGrowth * 100).toFixed(2)}%`]
+    ]
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [['指标', '数值']],
+      body: summaryData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: '#f0f5ff',
+        textColor: '#595959',
+        fontSize: 10,
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        fontSize: 10,
+        textColor: '#262626'
+      },
+      columnStyles: {
+        0: { width: 70 },
+        1: { width: 100 }
+      },
+      margin: { left: 15, right: 15 },
+      didDrawCell: (data: any) => {
+        if (data.row.index === 3) {
+          data.cell.styles.fontStyle = 'bold'
+          data.cell.styles.textColor = '#fa8c16'
+        }
+      }
+    })
+
+    y = (doc as any).lastAutoTable.finalY + 10
   }
 
-  printWindow.document.write(html)
-  printWindow.document.close()
+  if (report.value.salaryAdjustmentByCategory) {
+    const adjData: any[] = Object.entries(report.value.salaryAdjustmentByCategory)
+      .filter(([, v]) => v > 0)
+      .map(([k, v]) => [store.getCategoryLabel(k as AdjustmentReasonCategory), formatMoney(v)])
 
-  printWindow.onload = () => {
-    printWindow.document.title = `${selectedYear.value}年度薪酬包复盘报告_${dayjs().format('YYYYMMDD')}`
-    setTimeout(() => {
-      printWindow.print()
-    }, 300)
+    if (adjData.length > 0) {
+      doc.setFont('sans-serif', 'bold')
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('二、调薪事由分布', 15, y)
+      y += 10
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['调薪事由', '调薪金额']],
+        body: adjData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 10,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 10,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 80 },
+          1: { width: 90 }
+        },
+        margin: { left: 15, right: 15 }
+      })
+
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
   }
 
-  message.info('已打开打印预览，可另存为 PDF 文件')
+  if (report.value.companySummary?.performanceDistribution) {
+    const perfData: any[] = Object.entries(report.value.companySummary.performanceDistribution)
+      .map(([level, count]) => [level, `${count} 人`])
+
+    if (perfData.length > 0) {
+      doc.setFont('sans-serif', 'bold')
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('三、绩效等级分布', 15, y)
+      y += 10
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['绩效等级', '人数']],
+        body: perfData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 10,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 10,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 60 },
+          1: { width: 110 }
+        },
+        margin: { left: 15, right: 15 }
+      })
+
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
+  }
+
+  if (report.value.topSalaryGrowth && report.value.topSalaryGrowth.length > 0) {
+    doc.setFont('sans-serif', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor('#262626')
+    doc.text('四、薪资增长 TOP5', 15, y)
+    y += 10
+
+    const topGrowthData: any[] = report.value.topSalaryGrowth.map((emp) => [
+      emp.employeeName,
+      emp.departmentName || '-',
+      `+${(emp.salaryGrowthRate * 100).toFixed(2)}%`
+    ])
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [['姓名', '部门', '增长率']],
+      body: topGrowthData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: '#f0f5ff',
+        textColor: '#595959',
+        fontSize: 10,
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        fontSize: 9,
+        textColor: '#262626'
+      },
+      columnStyles: {
+        0: { width: 50 },
+        1: { width: 70 },
+        2: { width: 50 }
+      },
+      margin: { left: 15, right: 15 },
+      didDrawCell: (data: any) => {
+        if (data.column.index === 2) {
+          data.cell.styles.textColor = '#52c41a'
+          data.cell.styles.fontStyle = 'bold'
+        }
+      }
+    })
+
+    y = (doc as any).lastAutoTable.finalY + 10
+  }
+
+  if (report.value.topBonusEarners && report.value.topBonusEarners.length > 0) {
+    doc.setFont('sans-serif', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor('#262626')
+    doc.text('五、奖金收入 TOP5', 15, y)
+    y += 10
+
+    const topBonusData: any[] = report.value.topBonusEarners.map((emp) => [
+      emp.employeeName,
+      emp.departmentName || '-',
+      formatMoney(emp.summary.totalBonusGross)
+    ])
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: [['姓名', '部门', '奖金总额']],
+      body: topBonusData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: '#f0f5ff',
+        textColor: '#595959',
+        fontSize: 10,
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        fontSize: 9,
+        textColor: '#262626'
+      },
+      columnStyles: {
+        0: { width: 50 },
+        1: { width: 70 },
+        2: { width: 50 }
+      },
+      margin: { left: 15, right: 15 },
+      didDrawCell: (data: any) => {
+        if (data.column.index === 2) {
+          data.cell.styles.textColor = '#52c41a'
+          data.cell.styles.fontStyle = 'bold'
+        }
+      }
+    })
+
+    y = (doc as any).lastAutoTable.finalY + 10
+  }
+
+  if (report.value.employees && report.value.employees.length > 0) {
+    doc.setFont('sans-serif', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor('#262626')
+    doc.text('六、员工薪酬明细', 15, y)
+    y += 10
+
+    const empData: any[] = report.value.employees.map((emp) => [
+      emp.employeeName,
+      emp.departmentName || '-',
+      emp.position || '-',
+      formatMoney(emp.endSalary || 0),
+      `${(emp.salaryGrowthRate >= 0 ? '+' : '')}${(emp.salaryGrowthRate * 100).toFixed(2)}%`,
+      formatMoney(emp.summary?.totalBonusGross || 0),
+      formatMoney(emp.summary?.totalCompensationGross || 0),
+      emp.summary?.highestPerformanceLevel || '-'
+    ])
+
+    ;(doc as any).autoTable({
+      startY: y,
+      head: ['姓名', '部门', '职位', '年末月薪', '增长率', '年度奖金', '年度总包', '最高绩效'],
+      body: empData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: '#f0f5ff',
+        textColor: '#595959',
+        fontSize: 9,
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: '#262626'
+      },
+      columnStyles: {
+        0: { width: 30 },
+        1: { width: 35 },
+        2: { width: 35 },
+        3: { width: 35 },
+        4: { width: 35 },
+        5: { width: 35 },
+        6: { width: 40 },
+        7: { width: 30 }
+      },
+      margin: { left: 10, right: 10 },
+      didDrawCell: (data: any) => {
+        if (data.column.index === 4) {
+          data.cell.styles.textColor = data.cell.raw.startsWith('+') ? '#52c41a' : '#f5222d'
+        }
+        if (data.column.index === 5) {
+          data.cell.styles.textColor = '#52c41a'
+        }
+        if (data.column.index === 6) {
+          data.cell.styles.textColor = '#fa8c16'
+          data.cell.styles.fontStyle = 'bold'
+        }
+      }
+    })
+  }
+
+  doc.save(`${selectedYear.value}年度薪酬包复盘报告_${dayjs().format('YYYYMMDD')}.pdf`)
+  message.success('PDF报告已导出')
 }
 
 function handleExportJson() {
@@ -541,8 +882,7 @@ function handleExportJson() {
   message.success('报告数据已导出')
 }
 
-watch([scope, selectedDepartmentId, selectedEmployeeId], () => {
-})
+watch([scope, selectedDepartmentId, selectedEmployeeId], () => {})
 </script>
 
 <style scoped>
