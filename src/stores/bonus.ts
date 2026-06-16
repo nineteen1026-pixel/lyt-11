@@ -899,6 +899,90 @@ export const useBonusStore = defineStore('bonus', () => {
     })
   }
 
+  function calculateDynamicAnnualSalary(employee: Employee, year: number, pendingAdjustment?: {
+    effectiveDate: string
+    oldSalary: number
+    newSalary: number
+  }): number {
+    const allImpacts = getEmployeeImpacts(employee.id)
+    let sortedImpacts = [...allImpacts].sort((a, b) =>
+      dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
+    )
+
+    if (pendingAdjustment) {
+      sortedImpacts.push({
+        id: 'pending',
+        type: 'salary_adjustment',
+        name: '拟调薪',
+        description: '待审批调薪申请',
+        effectiveDate: pendingAdjustment.effectiveDate,
+        oldValue: pendingAdjustment.oldSalary,
+        newValue: pendingAdjustment.newSalary,
+        impactAmount: 0
+      })
+      sortedImpacts.sort((a, b) =>
+        dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
+      )
+    }
+
+    const yearImpacts = sortedImpacts.filter((i) => dayjs(i.effectiveDate).year() === year)
+
+    let salaryAtYearStart: number
+    if (yearImpacts.length > 0) {
+      salaryAtYearStart = yearImpacts[0].oldValue
+    } else {
+      salaryAtYearStart = employee.baseSalary
+      for (const imp of sortedImpacts) {
+        if (dayjs(imp.effectiveDate).year() < year) {
+          salaryAtYearStart = imp.newValue
+        }
+      }
+    }
+
+    if (yearImpacts.length === 0) {
+      return round2(salaryAtYearStart * 12)
+    }
+
+    let totalAnnualSalary = 0
+    let currentSalary = salaryAtYearStart
+    let periodStart = dayjs(`${year}-01-01`)
+    const yearEnd = dayjs(`${year}-12-31`)
+
+    for (const impact of yearImpacts) {
+      const impactDate = dayjs(impact.effectiveDate).startOf('month')
+      if (impactDate.isAfter(yearEnd)) break
+      if (impactDate.isBefore(periodStart)) {
+        currentSalary = impact.newValue
+        continue
+      }
+
+      const monthsBeforeImpact = impactDate.diff(periodStart, 'month')
+      if (monthsBeforeImpact > 0) {
+        totalAnnualSalary += currentSalary * monthsBeforeImpact
+      }
+      periodStart = impactDate
+      currentSalary = impact.newValue
+    }
+
+    const remainingMonths = yearEnd.endOf('month').diff(periodStart, 'month') + 1
+    if (remainingMonths > 0) {
+      totalAnnualSalary += currentSalary * remainingMonths
+    }
+
+    return round2(totalAnnualSalary)
+  }
+
+  function calculateAdjustedTenureBonus(
+    employee: Employee,
+    baseAmount: number,
+    adjustmentRatio: number = 0
+  ): number {
+    const baseTenureCoefficient = Math.min(employee.yearsOfService * 0.05, 0.5)
+    const adjustmentBoost = Math.min(adjustmentRatio * 0.5, 0.1)
+    const finalTenureCoefficient = Math.min(baseTenureCoefficient + adjustmentBoost, 0.6)
+    return round2(baseAmount * finalTenureCoefficient * bonusPool.value.tenureRatio)
+  }
+
   function removeEmployeeImpacts(employeeId: string) {
     salaryAdjustmentImpacts.value = salaryAdjustmentImpacts.value.filter(
       (i) => !i.id.startsWith(employeeId + '_')
@@ -963,9 +1047,14 @@ export const useBonusStore = defineStore('bonus', () => {
         const performanceBonus = round2(
           base * getPerformanceCoefficient(emp.performanceLevelId) * bonusPool.value.performanceRatio
         )
-        const tenureBonus = round2(
-          base * Math.min(emp.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
-        )
+        const empImpacts = getEmployeeImpacts(emp.id)
+        const totalAdjustmentRatio = empImpacts.reduce((sum, imp) => {
+          if (imp.oldValue > 0) {
+            return sum + ((imp.newValue - imp.oldValue) / imp.oldValue)
+          }
+          return sum
+        }, 0)
+        const tenureBonus = calculateAdjustedTenureBonus(emp, base, totalAdjustmentRatio)
         const tagBonus = round2(base * getTagCoefficient(emp.tagIds))
         const baseAmount = round2(base + performanceBonus + tenureBonus + tagBonus)
         const scaleFactor = deptAlloc / deptBaseTotal
@@ -1052,13 +1141,19 @@ export const useBonusStore = defineStore('bonus', () => {
       const ci = comprehensiveIncome.value[r.employeeId] || {
         annualSalary: emp?.baseSalary ? emp.baseSalary * 12 : 0,
         specialDeduction: 0,
-        specialAdditionalDeduction: 0,
+        specialAdditionalDeduction: 24000,
         otherDeduction: 0
       }
+      const dynamicAnnualSalary = emp
+        ? calculateDynamicAnnualSalary(emp, bonusCalculationYear.value)
+        : ci.annualSalary
+      const adjustedSpecialDeduction = emp
+        ? round2(dynamicAnnualSalary * 0.22)
+        : ci.specialDeduction
       const compResult = calculateComprehensiveTax(
-        ci.annualSalary,
+        dynamicAnnualSalary,
         grossBonus,
-        ci.specialDeduction,
+        adjustedSpecialDeduction,
         ci.specialAdditionalDeduction,
         ci.otherDeduction
       )
@@ -1492,6 +1587,8 @@ export const useBonusStore = defineStore('bonus', () => {
     addSalaryAdjustmentImpact,
     removeEmployeeImpacts,
     calculateEmployeeBaseAmount,
+    calculateDynamicAnnualSalary,
+    calculateAdjustedTenureBonus,
     updateDistributionRatio,
     initDistributionRatios,
     startCalibration,

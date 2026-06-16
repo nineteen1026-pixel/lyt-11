@@ -151,6 +151,91 @@
     </n-form-item>
 
     <n-divider title-placement="left">
+      <n-text strong>调薪联动影响预览</n-text>
+    </n-divider>
+
+    <n-card v-if="previewData" title="年终奖与个税影响预览" size="small" style="margin-bottom: 16px">
+      <n-grid :cols="2" :x-gap="16" :y-gap="12">
+        <n-gi>
+          <n-descriptions :column="1" size="small" bordered>
+            <n-descriptions-item label="年度薪资（调薪前）">
+              {{ formatCurrency(previewData.originalAnnualSalary) }}
+            </n-descriptions-item>
+            <n-descriptions-item label="年度薪资（调薪后）">
+              {{ formatCurrency(previewData.adjustedAnnualSalary) }}
+              <n-tag v-if="previewData.annualSalaryDiff > 0" type="success" size="small" style="margin-left: 8px">
+                +{{ formatCurrency(previewData.annualSalaryDiff) }}
+              </n-tag>
+            </n-descriptions-item>
+            <n-descriptions-item label="社保专项扣除（调薪后）">
+              {{ formatCurrency(previewData.adjustedSpecialDeduction) }}
+            </n-descriptions-item>
+          </n-descriptions>
+        </n-gi>
+        <n-gi>
+          <n-descriptions :column="1" size="small" bordered>
+            <n-descriptions-item label="年终奖（调薪前）">
+              {{ formatCurrency(previewData.originalBonus) }}
+            </n-descriptions-item>
+            <n-descriptions-item label="年终奖（调薪后）">
+              {{ formatCurrency(previewData.adjustedBonus) }}
+              <n-tag v-if="previewData.bonusDiff > 0" type="success" size="small" style="margin-left: 8px">
+                +{{ formatCurrency(previewData.bonusDiff) }}
+              </n-tag>
+            </n-descriptions-item>
+            <n-descriptions-item label="工龄加成（调薪后）">
+              {{ formatCurrency(previewData.adjustedTenureBonus) }}
+              <n-tag v-if="previewData.tenureBonusDiff > 0" type="success" size="small" style="margin-left: 8px">
+                +{{ formatCurrency(previewData.tenureBonusDiff) }}
+              </n-tag>
+            </n-descriptions-item>
+          </n-descriptions>
+        </n-gi>
+        <n-gi span="2">
+          <n-card title="个税对比（并入综合所得）" size="small" embedded>
+            <n-grid :cols="3" :x-gap="12">
+              <n-gi>
+                <n-statistic label="调薪前税款" :value="previewData.originalTaxComprehensive">
+                  <template #suffix>元</template>
+                </n-statistic>
+              </n-gi>
+              <n-gi>
+                <n-statistic label="调薪后税款" :value="previewData.adjustedTaxComprehensive">
+                  <template #suffix>元</template>
+                </n-statistic>
+              </n-gi>
+              <n-gi>
+                <n-statistic 
+                  label="税款变化" 
+                  :value="Math.abs(previewData.taxComprehensiveDiff)"
+                  :value-style="{ color: previewData.taxComprehensiveDiff > 0 ? '#d03050' : '#2080f0' }"
+                >
+                  <template #prefix>
+                    <n-icon v-if="previewData.taxComprehensiveDiff > 0"><ArrowUpOutlined /></n-icon>
+                    <n-icon v-else><ArrowDownOutlined /></n-icon>
+                  </template>
+                  <template #suffix>元</template>
+                </n-statistic>
+              </n-gi>
+            </n-grid>
+          </n-card>
+        </n-gi>
+        <n-gi span="2">
+          <n-alert type="info" :show-icon="true">
+            <n-text strong>调薪影响说明：</n-text>
+            <br />
+            生效月份：{{ form.effectiveDate }}，年内生效 {{ previewData.effectiveMonths }} 个月
+            <br />
+            调薪幅度：{{ (form.adjustmentRatio * 100).toFixed(2) }}%，工龄加成系数提升 {{ (previewData.tenureBoost * 100).toFixed(2) }}%
+            <br />
+            更优计税方案：{{ previewData.betterMethod === 'oneTime' ? '一次性单独计税' : '并入综合所得' }}，
+            可省税 {{ formatCurrency(previewData.savedTax) }}
+          </n-alert>
+        </n-gi>
+      </n-grid>
+    </n-card>
+
+    <n-divider title-placement="left">
       <n-text strong>预算与审批预览</n-text>
     </n-divider>
 
@@ -181,11 +266,12 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onMounted } from 'vue'
 import { useMessage, type FormInst, type FormRules } from 'naive-ui'
-import { UploadOutlined } from '@vicons/antd'
+import { UploadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@vicons/antd'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
 import { useBonusStore } from '@/stores/bonus'
 import type { SalaryAdjustmentRequest, AdjustmentReasonCategory, ApprovalNode } from '@/types'
-import { round2 } from '@/utils/tax'
+import { round2, calculateOneTimeTax, calculateComprehensiveTax, formatCurrency } from '@/utils/tax'
+import dayjs from 'dayjs'
 
 const props = defineProps<{
   requestId: string | null
@@ -279,6 +365,130 @@ const applicableNodes = computed(() => {
 const budgetCheckResult = computed(() => {
   if (!form.employeeId || form.adjustmentAmount <= 0) return null
   return store.checkBudgetAvailability(form.departmentId, form.adjustmentAmount * 12)
+})
+
+const previewData = computed(() => {
+  if (!selectedEmployee.value || form.adjustmentAmount <= 0 || !form.effectiveDate) return null
+
+  const year = dayjs(form.effectiveDate).year()
+  const emp = selectedEmployee.value
+  const bonusPool = bonusStore.bonusPool
+
+  const originalAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year)
+  const adjustedAnnualSalary = bonusStore.calculateDynamicAnnualSalary(emp, year, {
+    effectiveDate: form.effectiveDate,
+    oldSalary: form.currentSalary,
+    newSalary: form.proposedSalary
+  })
+
+  const originalWeightedSalary = bonusStore.calculateWeightedBaseSalary(emp, year)
+  const adjustedWeightedSalary = round2(
+    (originalAnnualSalary + form.adjustmentAmount * (12 - dayjs(form.effectiveDate).month())) / 12
+  )
+
+  const base = originalWeightedSalary * bonusPool.baseRatio
+  const adjustedBase = adjustedWeightedSalary * bonusPool.baseRatio
+
+  const empImpacts = bonusStore.getEmployeeImpacts(emp.id)
+  const existingAdjustmentRatio = empImpacts.reduce((sum, imp) => {
+    if (imp.oldValue > 0) {
+      return sum + ((imp.newValue - imp.oldValue) / imp.oldValue)
+    }
+    return sum
+  }, 0)
+
+  const originalTenureBonus = bonusStore.calculateAdjustedTenureBonus(emp, base, existingAdjustmentRatio)
+  const adjustedTenureBonus = bonusStore.calculateAdjustedTenureBonus(
+    emp,
+    adjustedBase,
+    existingAdjustmentRatio + form.adjustmentRatio
+  )
+
+  const performanceCoefficient = bonusStore.getPerformanceCoefficient(emp.performanceLevelId)
+  const originalPerformanceBonus = round2(base * performanceCoefficient * bonusPool.performanceRatio)
+  const adjustedPerformanceBonus = round2(adjustedBase * performanceCoefficient * bonusPool.performanceRatio)
+
+  const tagCoefficient = bonusStore.getTagCoefficient(emp.tagIds)
+  const originalTagBonus = round2(base * tagCoefficient)
+  const adjustedTagBonus = round2(adjustedBase * tagCoefficient)
+
+  const originalBaseAmount = round2(base + originalPerformanceBonus + originalTenureBonus + originalTagBonus)
+  const adjustedBaseAmount = round2(adjustedBase + adjustedPerformanceBonus + adjustedTenureBonus + adjustedTagBonus)
+
+  const deptAlloc = bonusStore.departmentAllocations[emp.departmentId] || 0
+  const deptBaseTotal = originalBaseAmount * 2
+  const scaleFactor = deptAlloc / deptBaseTotal
+
+  const originalBonus = round2(originalBaseAmount * scaleFactor)
+  const adjustedBonus = round2(adjustedBaseAmount * scaleFactor)
+
+  const originalSpecialDeduction = round2(originalAnnualSalary * 0.22)
+  const adjustedSpecialDeduction = round2(adjustedAnnualSalary * 0.22)
+
+  const ci = bonusStore.comprehensiveIncome[emp.id] || {
+    annualSalary: emp.baseSalary * 12,
+    specialDeduction: emp.baseSalary * 12 * 0.22,
+    specialAdditionalDeduction: 24000,
+    otherDeduction: 0
+  }
+
+  const originalCompResult = calculateComprehensiveTax(
+    originalAnnualSalary,
+    originalBonus,
+    originalSpecialDeduction,
+    ci.specialAdditionalDeduction,
+    ci.otherDeduction
+  )
+  const adjustedCompResult = calculateComprehensiveTax(
+    adjustedAnnualSalary,
+    adjustedBonus,
+    adjustedSpecialDeduction,
+    ci.specialAdditionalDeduction,
+    ci.otherDeduction
+  )
+
+  const originalTaxOneTime = round2(calculateOneTimeTax(originalBonus))
+  const adjustedTaxOneTime = round2(calculateOneTimeTax(adjustedBonus))
+
+  const adjustedTaxComprehensive = round2(adjustedCompResult.taxDifference)
+
+  let betterMethod: 'oneTime' | 'comprehensive' = 'oneTime'
+  let savedTax = 0
+  if (adjustedTaxOneTime < adjustedTaxComprehensive) {
+    betterMethod = 'oneTime'
+    savedTax = round2(adjustedTaxComprehensive - adjustedTaxOneTime)
+  } else if (adjustedTaxComprehensive < adjustedTaxOneTime) {
+    betterMethod = 'comprehensive'
+    savedTax = round2(adjustedTaxOneTime - adjustedTaxComprehensive)
+  }
+
+  const effectiveMonth = dayjs(form.effectiveDate).month()
+  const effectiveMonths = 12 - effectiveMonth
+
+  const tenureBoost = Math.min(form.adjustmentRatio * 0.5, 0.1)
+
+  return {
+    originalAnnualSalary,
+    adjustedAnnualSalary,
+    annualSalaryDiff: round2(adjustedAnnualSalary - originalAnnualSalary),
+    originalSpecialDeduction,
+    adjustedSpecialDeduction,
+    originalBonus,
+    adjustedBonus,
+    bonusDiff: round2(adjustedBonus - originalBonus),
+    originalTenureBonus,
+    adjustedTenureBonus,
+    tenureBonusDiff: round2(adjustedTenureBonus - originalTenureBonus),
+    originalTaxComprehensive: round2(originalCompResult.taxDifference),
+    adjustedTaxComprehensive,
+    taxComprehensiveDiff: round2(adjustedCompResult.taxDifference - originalCompResult.taxDifference),
+    originalTaxOneTime,
+    adjustedTaxOneTime,
+    betterMethod,
+    savedTax,
+    effectiveMonths,
+    tenureBoost
+  }
 })
 
 function formatMoney(n: number): string {
