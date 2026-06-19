@@ -164,7 +164,7 @@
               <n-icon size="18" color="#fa8c16"><BulbOutlined /></n-icon>
               <n-space vertical :size="2">
                 <n-text depth="3" style="font-size: 12px">建议</n-text>
-                <n-text strong>{{ review.insights.recommendation }}</n-text>
+                <n-text strong>{{ review.competitiveness && review.competitiveness.recommendations.length > 0 ? '基于市场对标分析' : '基于内部数据分析' }}</n-text>
               </n-space>
             </div>
           </n-gi>
@@ -349,19 +349,19 @@
         <n-grid :cols="4" :x-gap="16">
           <n-gi>
             <div class="stat-box">
-              <div class="stat-label">年度调薪次数</div>
+              <div class="stat-label">当年调薪次数</div>
               <div class="stat-num">{{ review.competitiveness.historicalAdjustments.count }} 次</div>
             </div>
           </n-gi>
           <n-gi>
             <div class="stat-box">
-              <div class="stat-label">年度调薪总额</div>
+              <div class="stat-label">当年调薪总额</div>
               <div class="stat-num">{{ formatMoney(review.competitiveness.historicalAdjustments.totalAmount) }}</div>
             </div>
           </n-gi>
           <n-gi>
             <div class="stat-box">
-              <div class="stat-label">平均调薪幅度</div>
+              <div class="stat-label">当年平均调薪幅度</div>
               <div class="stat-num">{{ (review.competitiveness.historicalAdjustments.averageRatio * 100).toFixed(1) }}%</div>
             </div>
           </n-gi>
@@ -369,6 +369,35 @@
             <div class="stat-box" :class="'risk-' + review.competitiveness.riskLevel">
               <div class="stat-label">流失风险</div>
               <div class="stat-num">{{ review.competitiveness.retentionRisk }}</div>
+            </div>
+          </n-gi>
+        </n-grid>
+
+        <n-divider style="margin: 16px 0" />
+
+        <n-grid :cols="4" :x-gap="16">
+          <n-gi>
+            <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
+              <div class="stat-label">历史调薪次数</div>
+              <div class="stat-num">{{ review.competitiveness.historicalAdjustments.multiYearCount }} 次</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
+              <div class="stat-label">历史累计调薪额</div>
+              <div class="stat-num">{{ formatMoney(review.competitiveness.historicalAdjustments.multiYearTotalAmount) }}</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
+              <div class="stat-label">年均调薪幅度</div>
+              <div class="stat-num">{{ (review.competitiveness.historicalAdjustments.multiYearAverageRatio * 100).toFixed(1) }}%</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
+              <div class="stat-label">年复合增长率</div>
+              <div class="stat-num">{{ (review.competitiveness.historicalAdjustments.cagr * 100).toFixed(1) }}%</div>
             </div>
           </n-gi>
         </n-grid>
@@ -415,7 +444,7 @@
         </n-space>
       </n-card>
 
-      <n-card v-if="review.competitiveness && review.competitiveness.recommendations.length > 0" size="small" title="调薪建议">
+      <n-card v-if="review.competitiveness && review.competitiveness.recommendations.length > 0" size="small" title="调薪建议（基于市场对标分析）">
         <n-space vertical :size="10" style="width: 100%">
           <div
             v-for="(rec, index) in review.competitiveness.recommendations"
@@ -426,6 +455,13 @@
             <div class="rec-content">{{ rec }}</div>
           </div>
         </n-space>
+      </n-card>
+
+      <n-card v-else-if="review.insights.recommendation" size="small" title="调薪建议（基于内部数据分析）">
+        <div class="recommendation-item">
+          <div class="rec-number">1</div>
+          <div class="rec-content">{{ review.insights.recommendation }}</div>
+        </div>
       </n-card>
     </n-space>
   </n-card>

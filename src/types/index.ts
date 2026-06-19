@@ -655,6 +655,11 @@ export interface SalaryCompetitivenessAssessment {
     totalAmount: number
     averageRatio: number
     vsMarketGrowth: number
+    multiYearCount: number
+    multiYearTotalAmount: number
+    multiYearAverageRatio: number
+    yearSpan: number
+    cagr: number
   }
   marketGrowthRate: number
   personalGrowthRate: number

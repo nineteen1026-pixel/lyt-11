@@ -440,15 +440,36 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       adjustmentCount > 0
         ? yearHistory.reduce((sum, h) => sum + h.adjustmentRatio, 0) / adjustmentCount
         : 0
+
+    const multiYearCount = salaryHistory.length
+    const multiYearTotalAmount = salaryHistory.reduce((sum, h) => sum + h.adjustmentAmount, 0)
+    const multiYearAverageRatio =
+      multiYearCount > 0
+        ? salaryHistory.reduce((sum, h) => sum + h.adjustmentRatio, 0) / multiYearCount
+        : 0
+    const adjustmentYears = new Set(salaryHistory.map((h) => dayjs(h.effectiveDate).year()))
+    const yearSpan = adjustmentYears.size > 0 ? Math.max(...adjustmentYears) - Math.min(...adjustmentYears) + 1 : 0
+
+    const earliestSalary = salaryHistory.length > 0
+      ? (() => {
+          const sorted = [...salaryHistory].sort((a, b) => dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf())
+          const beforeFirst = sorted[0].oldSalary || (sorted[0].newSalary - sorted[0].adjustmentAmount)
+          return { salary: beforeFirst, year: dayjs(sorted[0].effectiveDate).year() }
+        })()
+      : { salary: startSalary, year: year }
+    const cagr = yearSpan > 1 && earliestSalary.salary > 0
+      ? Math.pow(endSalary / earliestSalary.salary, 1 / yearSpan) - 1
+      : (startSalary > 0 ? (endSalary - startSalary) / startSalary : 0)
+
     const marketGrowthRate = benchmark.salaryGrowthRange.median
     const personalGrowthRate = startSalary > 0 ? (endSalary - startSalary) / startSalary : 0
-    const vsMarketGrowth = round2(personalGrowthRate - marketGrowthRate)
+    const vsMarketGrowth = round2(cagr - marketGrowthRate)
 
     const gapAmount = round2(benchmark.baseSalary.p50 - endSalary)
     const gapPercent = round2(benchmark.baseSalary.p50 > 0 ? gapAmount / benchmark.baseSalary.p50 : 0)
-    const projectedGap1Y = round2(gapAmount * (1 + marketGrowthRate) - endSalary * personalGrowthRate)
+    const projectedGap1Y = round2(gapAmount * (1 + marketGrowthRate) - endSalary * cagr)
     const projectedGap2Y = round2(
-      gapAmount * Math.pow(1 + marketGrowthRate, 2) - endSalary * personalGrowthRate * 2
+      gapAmount * Math.pow(1 + marketGrowthRate, 2) - endSalary * (Math.pow(1 + cagr, 2) - 1)
     )
 
     const recommendations: string[] = []
@@ -502,9 +523,15 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       )
     }
 
-    if (personalGrowthRate < marketGrowthRate && adjustmentCount > 0) {
+    if (cagr < marketGrowthRate && multiYearCount > 0) {
       recommendations.push(
-        `过去一年个人薪资增长 ${(personalGrowthRate * 100).toFixed(1)}%，低于市场平均增长率 ${(marketGrowthRate * 100).toFixed(1)}%，建议在下一调薪周期补足差距`
+        `近${yearSpan > 1 ? yearSpan + '年' : '1年'}累计薪资年复合增长 ${(cagr * 100).toFixed(1)}%，低于市场平均增长率 ${(marketGrowthRate * 100).toFixed(1)}%，建议在下一调薪周期补足差距`
+      )
+    }
+
+    if (multiYearCount > adjustmentCount && yearSpan > 1) {
+      recommendations.push(
+        `历史${yearSpan}年共调薪${multiYearCount}次，累计调薪${formatMoney(multiYearTotalAmount)}，年均幅度${(multiYearAverageRatio * 100).toFixed(1)}%`
       )
     }
 
@@ -542,7 +569,12 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         count: adjustmentCount,
         totalAmount: round2(totalAdjustmentAmount),
         averageRatio: round2(avgAdjustmentRatio),
-        vsMarketGrowth
+        vsMarketGrowth,
+        multiYearCount,
+        multiYearTotalAmount: round2(multiYearTotalAmount),
+        multiYearAverageRatio: round2(multiYearAverageRatio),
+        yearSpan,
+        cagr: round2(cagr)
       },
       marketGrowthRate: round2(marketGrowthRate),
       personalGrowthRate: round2(personalGrowthRate),
@@ -1698,8 +1730,8 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       marketPositionText = `市场分位 ${competitiveness.baseSalaryPercentile}%，${getCompetitivenessLevelLabel(competitiveness.competitivenessLevel)}`
       competitivenessText = getCompetitivenessLevelLabel(competitiveness.competitivenessLevel)
 
-      if (competitiveness.gapAnalysis.currentGapAmount > 0) {
-        recommendation = `与市场中位数差距 ${formatMoney(competitiveness.gapAnalysis.currentGapAmount)}（${(competitiveness.gapAnalysis.currentGapPercent * 100).toFixed(1)}%），${recommendation}`
+      if (competitiveness.recommendations.length > 0) {
+        recommendation = competitiveness.recommendations[0]
       }
     }
 

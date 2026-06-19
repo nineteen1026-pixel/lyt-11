@@ -289,6 +289,7 @@
           :data="report.employees || []"
           :row-key="(row: any) => row.employeeId"
           striped
+          :scroll-x="1400"
           :pagination="{ pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50, 100] }"
         />
       </n-card>
@@ -453,21 +454,43 @@ const departmentColumns: DataTableColumns<any> = [
   }
 ]
 
+function getCompetitivenessColorType(level: string): 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default' {
+  const types: Record<string, 'success' | 'error' | 'warning' | 'info' | 'primary' | 'default'> = {
+    far_below: 'error',
+    below: 'warning',
+    at_market: 'info',
+    above: 'success',
+    far_above: 'success'
+  }
+  return types[level] || 'default'
+}
+
+function getCompetitivenessLabel(level: string): string {
+  const labels: Record<string, string> = {
+    far_below: '远低于',
+    below: '低于',
+    at_market: '符合',
+    above: '高于',
+    far_above: '远高于'
+  }
+  return labels[level] || level
+}
+
 const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
-  { title: '姓名', key: 'employeeName', width: 100 },
-  { title: '部门', key: 'departmentName', width: 120 },
-  { title: '职位', key: 'position', width: 120 },
+  { title: '姓名', key: 'employeeName', width: 80, fixed: 'left' },
+  { title: '部门', key: 'departmentName', width: 100 },
+  { title: '职位', key: 'position', width: 100 },
   {
     title: '年末月薪',
     key: 'endSalary',
-    width: 120,
+    width: 110,
     align: 'right',
     render: (row: EmployeeAnnualReview) => formatMoney(row.endSalary || 0)
   },
   {
     title: '薪资增长率',
     key: 'salaryGrowthRate',
-    width: 110,
+    width: 100,
     align: 'right',
     render: (row: EmployeeAnnualReview) => {
       const rate = row.salaryGrowthRate || 0
@@ -479,7 +502,7 @@ const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
   {
     title: '年度奖金',
     key: 'bonus',
-    width: 130,
+    width: 110,
     align: 'right',
     render: (row: EmployeeAnnualReview) => h('span', {
       style: 'color: #52c41a; font-weight: 600'
@@ -488,7 +511,7 @@ const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
   {
     title: '年度总包',
     key: 'compensation',
-    width: 140,
+    width: 120,
     align: 'right',
     render: (row: EmployeeAnnualReview) => h('span', {
       style: 'color: #fa8c16; font-weight: 700'
@@ -497,7 +520,7 @@ const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
   {
     title: '最高绩效',
     key: 'performance',
-    width: 100,
+    width: 80,
     align: 'center',
     render: (row: EmployeeAnnualReview) => {
       const level = row.summary?.highestPerformanceLevel || '-'
@@ -509,6 +532,57 @@ const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
         size: 'small',
         bordered: true
       }, { default: () => level })
+    }
+  },
+  {
+    title: '市场分位',
+    key: 'marketPercentile',
+    width: 90,
+    align: 'center',
+    render: (row: EmployeeAnnualReview) => {
+      if (!row.competitiveness) return h('span', { style: 'color: #8c8c8c' }, '-')
+      const p = row.competitiveness.baseSalaryPercentile
+      const color = p < 25 ? '#f5222d' : p < 50 ? '#fa8c16' : p < 75 ? '#1890ff' : '#52c41a'
+      return h('span', { style: `color: ${color}; font-weight: 700` }, `P${p}`)
+    }
+  },
+  {
+    title: '竞争力',
+    key: 'competitivenessLevel',
+    width: 80,
+    align: 'center',
+    render: (row: EmployeeAnnualReview) => {
+      if (!row.competitiveness) return h('span', { style: 'color: #8c8c8c' }, '-')
+      return h(NTag, {
+        type: getCompetitivenessColorType(row.competitiveness.competitivenessLevel),
+        size: 'small',
+        bordered: true
+      }, { default: () => getCompetitivenessLabel(row.competitiveness!.competitivenessLevel) })
+    }
+  },
+  {
+    title: '流失风险',
+    key: 'riskLevel',
+    width: 80,
+    align: 'center',
+    render: (row: EmployeeAnnualReview) => {
+      if (!row.competitiveness) return h('span', { style: 'color: #8c8c8c' }, '-')
+      const risk = row.competitiveness.riskLevel
+      const riskColor: Record<string, string> = { high: '#f5222d', medium: '#fa8c16', low: '#52c41a' }
+      const riskLabel: Record<string, string> = { high: '高', medium: '中', low: '低' }
+      return h('span', { style: `color: ${riskColor[risk] || '#8c8c8c'}; font-weight: 600` }, riskLabel[risk] || risk)
+    }
+  },
+  {
+    title: '调薪建议',
+    key: 'recommendation',
+    width: 200,
+    render: (row: EmployeeAnnualReview) => {
+      if (!row.competitiveness || row.competitiveness.recommendations.length === 0) {
+        return h('span', { style: 'color: #8c8c8c; font-size: 12px' }, row.insights?.recommendation || '-')
+      }
+      const first = row.competitiveness.recommendations[0]
+      return h('span', { style: 'font-size: 12px; line-height: 1.5' }, first.length > 30 ? first.slice(0, 30) + '…' : first)
     }
   }
 ]
@@ -818,16 +892,82 @@ async function handleExportPdf() {
         `${(emp.salaryGrowthRate || 0) >= 0 ? '+' : ''}${((emp.salaryGrowthRate || 0) * 100).toFixed(2)}%`,
         formatMoney(emp.summary?.totalBonusGross || 0),
         formatMoney(emp.summary?.totalCompensationGross || 0),
-        emp.summary?.highestPerformanceLevel || '-'
+        emp.summary?.highestPerformanceLevel || '-',
+        emp.competitiveness ? `P${emp.competitiveness.baseSalaryPercentile}` : '-',
+        emp.competitiveness ? getCompetitivenessLabel(emp.competitiveness.competitivenessLevel) : '-',
+        emp.competitiveness ? (emp.competitiveness.riskLevel === 'high' ? '高' : emp.competitiveness.riskLevel === 'medium' ? '中' : '低') : '-'
       ])
 
       ;(doc as any).autoTable({
         startY: y,
-        head: [['姓名', '部门', '职位', '年末月薪', '增长率', '年度奖金', '年度总包', '最高绩效']],
+        head: [['姓名', '部门', '职位', '年末月薪', '增长率', '年度奖金', '年度总包', '绩效', '市场分位', '竞争力', '流失风险']],
         body: empData,
         theme: 'striped',
         headStyles: {
           fillColor: '#f0f5ff',
+          textColor: '#595959',
+          fontSize: 7,
+          font: fontName,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 6,
+          font: fontName,
+          textColor: '#262626'
+        },
+        columnStyles: {
+          0: { width: 20 },
+          1: { width: 25 },
+          2: { width: 25 },
+          3: { width: 30, halign: 'right' },
+          4: { width: 20, halign: 'right' },
+          5: { width: 30, halign: 'right' },
+          6: { width: 30, halign: 'right' },
+          7: { width: 15, halign: 'center' },
+          8: { width: 18, halign: 'center' },
+          9: { width: 18, halign: 'center' },
+          10: { width: 18, halign: 'center' }
+        },
+        margin: { left: 10, right: 10 },
+        styles: {
+          cellPadding: 1.5
+        }
+      })
+
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
+
+    // 七、市场对标与竞争力分析
+    const employeesWithComp = (report.value.employees || []).filter((e) => e.competitiveness)
+    if (employeesWithComp.length > 0) {
+      doc.setFontSize(12)
+      doc.setTextColor('#262626')
+      doc.text('七、市场对标与竞争力分析', 15, y)
+      y += 8
+
+      const compData: any[][] = employeesWithComp.map((emp) => {
+        const c = emp.competitiveness!
+        const riskLabel = c.riskLevel === 'high' ? '高' : c.riskLevel === 'medium' ? '中' : '低'
+        const gapDir = c.gapAnalysis.currentGapAmount > 0 ? '低于' : '高于'
+        const gapStr = `${gapDir}市场P50 ${Math.abs(c.gapAnalysis.currentGapPercent * 100).toFixed(1)}%`
+        const topRec = c.recommendations.length > 0 ? c.recommendations[0] : '-'
+        return [
+          emp.employeeName,
+          `P${c.baseSalaryPercentile}`,
+          getCompetitivenessLabel(c.competitivenessLevel),
+          gapStr,
+          riskLabel,
+          topRec.length > 35 ? topRec.slice(0, 35) + '…' : topRec
+        ]
+      })
+
+      ;(doc as any).autoTable({
+        startY: y,
+        head: [['姓名', '市场分位', '竞争力', 'vs市场P50', '流失风险', '核心建议']],
+        body: compData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: '#e6f7ff',
           textColor: '#595959',
           fontSize: 8,
           font: fontName,
@@ -840,19 +980,51 @@ async function handleExportPdf() {
         },
         columnStyles: {
           0: { width: 25 },
-          1: { width: 30 },
-          2: { width: 30 },
-          3: { width: 35, halign: 'right' },
-          4: { width: 25, halign: 'right' },
-          5: { width: 35, halign: 'right' },
-          6: { width: 35, halign: 'right' },
-          7: { width: 25, halign: 'center' }
+          1: { width: 20, halign: 'center' },
+          2: { width: 22, halign: 'center' },
+          3: { width: 30, halign: 'center' },
+          4: { width: 22, halign: 'center' },
+          5: { width: 95 }
         },
         margin: { left: 10, right: 10 },
         styles: {
           cellPadding: 2
         }
       })
+
+      y = (doc as any).lastAutoTable.finalY + 10
+
+      // 调薪建议明细
+      const employeesWithRecs = employeesWithComp.filter((e) => e.competitiveness!.recommendations.length > 0)
+      if (employeesWithRecs.length > 0) {
+        doc.setFontSize(11)
+        doc.setTextColor('#262626')
+        doc.text('调薪建议明细', 15, y)
+        y += 7
+
+        for (const emp of employeesWithRecs) {
+          if (y > 265) {
+            doc.addPage()
+            y = 20
+          }
+          doc.setFontSize(9)
+          doc.setTextColor('#262626')
+          doc.text(`${emp.employeeName}（${getCompetitivenessLabel(emp.competitiveness!.competitivenessLevel)}，P${emp.competitiveness!.baseSalaryPercentile}）`, 18, y)
+          y += 5
+          doc.setFontSize(7)
+          doc.setTextColor('#595959')
+          for (const rec of emp.competitiveness!.recommendations) {
+            if (y > 270) {
+              doc.addPage()
+              y = 20
+            }
+            const lines = doc.splitTextToSize(`• ${rec}`, 165)
+            doc.text(lines, 22, y)
+            y += lines.length * 3.5
+          }
+          y += 3
+        }
+      }
     }
 
     doc.save(`${selectedYear.value}年度薪酬包复盘报告_${dayjs().format('YYYYMMDD')}.pdf`)
