@@ -26,7 +26,12 @@ import type {
   AnnualCompensationSummary,
   EmployeeAnnualReview,
   DepartmentAnnualReview,
-  AnnualCompensationReviewReport
+  AnnualCompensationReviewReport,
+  YearlySalaryGrowthData,
+  YearlyBonusData,
+  YearlyPerformanceData,
+  CrossYearComparisonPoint,
+  CrossYearComparisonReport
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -664,18 +669,7 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       }
     } else {
       const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
-      pendingToUsedBudget(req.departmentId, req.adjustmentAmount * 12)
-      bonusStore.addSalaryAdjustmentImpact(req.employeeId, {
-        name: '调薪影响',
-        description: `${req.reasonName} - ${req.requestNo}`,
-        effectiveDate: req.effectiveDate,
-        oldValue: req.currentSalary,
-        newValue: req.proposedSalary,
-        requestNo: req.requestNo,
-        reasonName: req.reasonName
-      })
-      bonusStore.updateEmployee(req.employeeId, { baseSalary: req.proposedSalary })
-      addSalaryHistoryFromRequest(req, now, approverName)
+      syncCompensationArchiveOnApproval(req, approverName)
       requests.value[idx] = {
         ...req,
         status: 'approved',
@@ -1813,6 +1807,613 @@ ${topBonus.length > 0 ? `
 </html>`
   }
 
+  function syncCompensationArchiveOnApproval(request: SalaryAdjustmentRequest, approverName: string): boolean {
+    try {
+      const approvedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+      bonusStore.updateEmployee(request.employeeId, { baseSalary: request.proposedSalary })
+
+      bonusStore.addSalaryAdjustmentImpact(request.employeeId, {
+        name: '调薪影响',
+        description: `${request.reasonName} - ${request.requestNo}`,
+        effectiveDate: request.effectiveDate,
+        oldValue: request.currentSalary,
+        newValue: request.proposedSalary,
+        requestNo: request.requestNo,
+        reasonName: request.reasonName
+      })
+
+      addSalaryHistoryFromRequest(request, approvedAt, approverName)
+
+      pendingToUsedBudget(request.departmentId, request.adjustmentAmount * 12)
+
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function getYearlySalaryGrowthData(year: number, employeeIds?: string[]): YearlySalaryGrowthData {
+    const allEmployees = bonusStore.allEmployees
+    const targetEmployees = employeeIds
+      ? allEmployees.filter((e) => employeeIds.includes(e.id))
+      : allEmployees
+
+    const yearHistory = salaryHistory.value.filter((h) => {
+      const inYear = dayjs(h.effectiveDate).year() === year
+      const inScope = !employeeIds || employeeIds.includes(h.employeeId)
+      return inYear && inScope
+    })
+
+    const prevYearHistory = salaryHistory.value.filter((h) => {
+      const beforeYear = dayjs(h.effectiveDate).year() < year
+      const inScope = !employeeIds || employeeIds.includes(h.employeeId)
+      return beforeYear && inScope
+    })
+
+    let totalStartSalary = 0
+    let totalEndSalary = 0
+    let totalAdjustment = 0
+    let adjustmentCount = 0
+    let highestAdjustment = 0
+    let lowestAdjustment = Infinity
+
+    const adjustmentByCategory: Record<AdjustmentReasonCategory, number> = {
+      annual: 0,
+      performance: 0,
+      promotion: 0,
+      market: 0,
+      certification: 0,
+      transfer: 0,
+      special: 0
+    }
+
+    targetEmployees.forEach((emp) => {
+      const empHistoryPrev = prevYearHistory
+        .filter((h) => h.employeeId === emp.id)
+        .sort((a, b) => dayjs(b.effectiveDate).valueOf() - dayjs(a.effectiveDate).valueOf())
+
+      const empHistoryYear = yearHistory
+        .filter((h) => h.employeeId === emp.id)
+        .sort((a, b) => dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf())
+
+      let startSalary = empHistoryPrev.length > 0 ? empHistoryPrev[0].newSalary : emp.baseSalary
+
+      if (empHistoryYear.length > 0 && dayjs(empHistoryYear[0].effectiveDate).year() < year) {
+        startSalary = empHistoryYear[0].newSalary
+      }
+
+      const endSalary = empHistoryYear.length > 0
+        ? empHistoryYear[empHistoryYear.length - 1].newSalary
+        : startSalary
+
+      totalStartSalary += startSalary
+      totalEndSalary += endSalary
+    })
+
+    yearHistory.forEach((h) => {
+      totalAdjustment += h.adjustmentAmount
+      adjustmentCount++
+      if (h.adjustmentAmount > highestAdjustment) highestAdjustment = h.adjustmentAmount
+      if (h.adjustmentAmount < lowestAdjustment) lowestAdjustment = h.adjustmentAmount
+      adjustmentByCategory[h.reasonCategory] = (adjustmentByCategory[h.reasonCategory] || 0) + h.adjustmentAmount
+    })
+
+    const headcount = targetEmployees.length
+    const avgStart = headcount > 0 ? totalStartSalary / headcount : 0
+    const averageAdjustmentRatio = avgStart > 0 ? (totalEndSalary - totalStartSalary) / totalStartSalary : 0
+
+    return {
+      year,
+      startSalary: round2(totalStartSalary),
+      endSalary: round2(totalEndSalary),
+      totalAdjustmentAmount: round2(totalAdjustment),
+      adjustmentCount,
+      averageAdjustmentRatio: round2(averageAdjustmentRatio),
+      highestAdjustment: round2(highestAdjustment),
+      lowestAdjustment: lowestAdjustment === Infinity ? 0 : round2(lowestAdjustment),
+      adjustmentByCategory,
+      headcount
+    }
+  }
+
+  function getYearlyBonusData(year: number, employeeIds?: string[]): YearlyBonusData {
+    const yearBonuses = bonusPayments.value.filter((b) => {
+      const inYear = b.year === year && b.approvalStatus === 'approved'
+      const inScope = !employeeIds || employeeIds.includes(b.employeeId)
+      return inYear && inScope
+    })
+
+    const totalGross = yearBonuses.reduce((sum, b) => sum + b.grossAmount, 0)
+    const totalNet = yearBonuses.reduce((sum, b) => sum + b.netAmount, 0)
+    const bonusCount = yearBonuses.length
+
+    const uniqueEmployees = new Set(yearBonuses.map((b) => b.employeeId))
+    const avgBonus = uniqueEmployees.size > 0 ? totalGross / uniqueEmployees.size : 0
+
+    const bonusByType: Record<string, number> = {}
+    yearBonuses.forEach((b) => {
+      bonusByType[b.type] = (bonusByType[b.type] || 0) + b.grossAmount
+    })
+
+    return {
+      year,
+      totalBonusGross: round2(totalGross),
+      totalBonusNet: round2(totalNet),
+      averageBonus: round2(avgBonus),
+      bonusCount,
+      bonusByType
+    }
+  }
+
+  function getYearlyPerformanceData(year: number, employeeIds?: string[]): YearlyPerformanceData {
+    const yearReviews = performanceHistory.value.filter((p) => {
+      const inYear = p.year === year
+      const inScope = !employeeIds || employeeIds.includes(p.employeeId)
+      return inYear && inScope
+    })
+
+    const distribution: Record<string, number> = {}
+    let totalCoeff = 0
+
+    const latestByEmployee: Record<string, PerformanceHistoryRecord> = {}
+    yearReviews.forEach((p) => {
+      if (!latestByEmployee[p.employeeId] || dayjs(p.reviewedAt).isAfter(latestByEmployee[p.employeeId].reviewedAt)) {
+        latestByEmployee[p.employeeId] = p
+      }
+    })
+
+    Object.values(latestByEmployee).forEach((p) => {
+      distribution[p.levelName] = (distribution[p.levelName] || 0) + 1
+      totalCoeff += p.coefficient
+    })
+
+    const count = Object.keys(latestByEmployee).length
+
+    return {
+      year,
+      totalReviews: yearReviews.length,
+      distribution,
+      averageCoefficient: count > 0 ? round2(totalCoeff / count) : 0
+    }
+  }
+
+  function buildCrossYearComparisonReport(
+    years: number[],
+    scope: 'company' | 'department' | 'employee' = 'company',
+    scopeId?: string
+  ): CrossYearComparisonReport {
+    const sortedYears = [...years].sort((a, b) => a - b)
+    const allEmployees = bonusStore.allEmployees
+
+    let scopeName = '全公司'
+    let targetEmployeeIds: string[] | undefined
+
+    if (scope === 'department' && scopeId) {
+      const dept = bonusStore.getDepartmentById(scopeId)
+      scopeName = dept?.name || '未知部门'
+      targetEmployeeIds = dept?.employees.map((e) => e.id) || []
+    } else if (scope === 'employee' && scopeId) {
+      const emp = bonusStore.getEmployeeById(scopeId)
+      scopeName = emp?.name || '未知员工'
+      targetEmployeeIds = [scopeId]
+    }
+
+    const comparisonPoints: CrossYearComparisonPoint[] = []
+    const yearlySalaryData: YearlySalaryGrowthData[] = []
+    const yearlyBonusData: YearlyBonusData[] = []
+    const yearlyPerformanceData: YearlyPerformanceData[] = []
+
+    sortedYears.forEach((year, index) => {
+      const salaryData = getYearlySalaryGrowthData(year, targetEmployeeIds)
+      const bonusData = getYearlyBonusData(year, targetEmployeeIds)
+      const perfData = getYearlyPerformanceData(year, targetEmployeeIds)
+
+      yearlySalaryData.push(salaryData)
+      yearlyBonusData.push(bonusData)
+      yearlyPerformanceData.push(perfData)
+
+      const headcount = salaryData.headcount
+      const avgSalary = headcount > 0 ? salaryData.endSalary / headcount : 0
+      const avgBonus = headcount > 0 ? bonusData.totalBonusGross / headcount : 0
+      const avgTotalComp = avgSalary * 12 + avgBonus
+
+      let salaryGrowthRate = 0
+      let bonusGrowthRate = 0
+      let totalCompGrowthRate = 0
+
+      if (index > 0) {
+        const prevPoint = comparisonPoints[index - 1]
+        if (prevPoint.averageSalary > 0) {
+          salaryGrowthRate = (avgSalary - prevPoint.averageSalary) / prevPoint.averageSalary
+        }
+        if (prevPoint.averageBonus > 0) {
+          bonusGrowthRate = (avgBonus - prevPoint.averageBonus) / prevPoint.averageBonus
+        }
+        if (prevPoint.averageTotalCompensation > 0) {
+          totalCompGrowthRate = (avgTotalComp - prevPoint.averageTotalCompensation) / prevPoint.averageTotalCompensation
+        }
+      }
+
+      comparisonPoints.push({
+        year,
+        label: `${year}年`,
+        averageSalary: round2(avgSalary),
+        averageBonus: round2(avgBonus),
+        averageTotalCompensation: round2(avgTotalComp),
+        salaryGrowthRate: round2(salaryGrowthRate),
+        bonusGrowthRate: round2(bonusGrowthRate),
+        totalCompGrowthRate: round2(totalCompGrowthRate),
+        headcount,
+        totalSalaryCost: round2(avgSalary * 12 * headcount),
+        totalBonusCost: round2(bonusData.totalBonusGross),
+        totalCompCost: round2(avgSalary * 12 * headcount + bonusData.totalBonusGross)
+      })
+    })
+
+    const firstPoint = comparisonPoints[0]
+    const lastPoint = comparisonPoints[comparisonPoints.length - 1]
+    const numYears = sortedYears.length - 1
+
+    let overallSalaryGrowth = 0
+    let overallBonusGrowth = 0
+    let overallCompGrowth = 0
+    let cagrSalary = 0
+    let cagrBonus = 0
+    let cagrTotal = 0
+
+    if (firstPoint && lastPoint && numYears > 0) {
+      if (firstPoint.averageSalary > 0) {
+        overallSalaryGrowth = (lastPoint.averageSalary - firstPoint.averageSalary) / firstPoint.averageSalary
+        cagrSalary = Math.pow(lastPoint.averageSalary / firstPoint.averageSalary, 1 / numYears) - 1
+      }
+      if (firstPoint.averageBonus > 0) {
+        overallBonusGrowth = (lastPoint.averageBonus - firstPoint.averageBonus) / firstPoint.averageBonus
+        cagrBonus = Math.pow(lastPoint.averageBonus / firstPoint.averageBonus, 1 / numYears) - 1
+      }
+      if (firstPoint.averageTotalCompensation > 0) {
+        overallCompGrowth = (lastPoint.averageTotalCompensation - firstPoint.averageTotalCompensation) / firstPoint.averageTotalCompensation
+        cagrTotal = Math.pow(lastPoint.averageTotalCompensation / firstPoint.averageTotalCompensation, 1 / numYears) - 1
+      }
+    }
+
+    const keyFindings: string[] = []
+    if (overallSalaryGrowth > 0.1) {
+      keyFindings.push(`薪资增长强劲，${sortedYears[0]}-${sortedYears[sortedYears.length - 1]}年累计增长 ${(overallSalaryGrowth * 100).toFixed(1)}%`)
+    } else if (overallSalaryGrowth > 0) {
+      keyFindings.push(`薪资平稳增长，累计增幅 ${(overallSalaryGrowth * 100).toFixed(1)}%`)
+    } else {
+      keyFindings.push('薪资增长趋于保守，需关注人才保留')
+    }
+
+    if (cagrSalary > 0.08) {
+      keyFindings.push(`薪资复合年增长率达 ${(cagrSalary * 100).toFixed(1)}%，高于行业平均水平`)
+    }
+
+    if (overallBonusGrowth > overallSalaryGrowth) {
+      keyFindings.push('奖金增幅超过薪资增幅，激励导向明显')
+    }
+
+    const deptComparison = scope === 'company'
+      ? bonusStore.departments.map((dept) => {
+          const deptEmpIds = dept.employees.map((e) => e.id)
+          const deptPoints: CrossYearComparisonPoint[] = []
+
+          sortedYears.forEach((year, idx) => {
+            const sData = getYearlySalaryGrowthData(year, deptEmpIds)
+            const bData = getYearlyBonusData(year, deptEmpIds)
+            const hc = sData.headcount
+            const avgSal = hc > 0 ? sData.endSalary / hc : 0
+            const avgBon = hc > 0 ? bData.totalBonusGross / hc : 0
+            const avgTotal = avgSal * 12 + avgBon
+
+            let salGrowth = 0
+            let bonGrowth = 0
+            let totalGrowth = 0
+            if (idx > 0 && deptPoints[idx - 1].averageSalary > 0) {
+              salGrowth = (avgSal - deptPoints[idx - 1].averageSalary) / deptPoints[idx - 1].averageSalary
+              bonGrowth = (avgBon - deptPoints[idx - 1].averageBonus) / deptPoints[idx - 1].averageBonus
+              totalGrowth = (avgTotal - deptPoints[idx - 1].averageTotalCompensation) / deptPoints[idx - 1].averageTotalCompensation
+            }
+
+            deptPoints.push({
+              year,
+              label: `${year}年`,
+              averageSalary: round2(avgSal),
+              averageBonus: round2(avgBon),
+              averageTotalCompensation: round2(avgTotal),
+              salaryGrowthRate: round2(salGrowth),
+              bonusGrowthRate: round2(bonGrowth),
+              totalCompGrowthRate: round2(totalGrowth),
+              headcount: hc,
+              totalSalaryCost: round2(avgSal * 12 * hc),
+              totalBonusCost: round2(bData.totalBonusGross),
+              totalCompCost: round2(avgSal * 12 * hc + bData.totalBonusGross)
+            })
+          })
+
+          return {
+            departmentId: dept.id,
+            departmentName: dept.name,
+            points: deptPoints
+          }
+        })
+      : undefined
+
+    const topGrowers = scope === 'company' && sortedYears.length >= 2
+      ? allEmployees
+          .map((emp) => {
+            const growthPoints: { year: number; salary: number; growthRate: number }[] = []
+            let prevSalary = 0
+
+            sortedYears.forEach((year, idx) => {
+              const yearHistory = salaryHistory.value
+                .filter((h) => h.employeeId === emp.id && dayjs(h.effectiveDate).year() === year)
+                .sort((a, b) => dayjs(b.effectiveDate).valueOf() - dayjs(a.effectiveDate).valueOf())
+
+              const prevYearHistory = salaryHistory.value
+                .filter((h) => h.employeeId === emp.id && dayjs(h.effectiveDate).year() < year)
+                .sort((a, b) => dayjs(b.effectiveDate).valueOf() - dayjs(a.effectiveDate).valueOf())
+
+              let yearEndSalary = emp.baseSalary
+              if (yearHistory.length > 0) {
+                yearEndSalary = yearHistory[0].newSalary
+              } else if (prevYearHistory.length > 0) {
+                yearEndSalary = prevYearHistory[0].newSalary
+              }
+
+              let growthRate = 0
+              if (idx > 0 && prevSalary > 0) {
+                growthRate = (yearEndSalary - prevSalary) / prevSalary
+              }
+
+              growthPoints.push({ year, salary: yearEndSalary, growthRate: round2(growthRate) })
+              prevSalary = yearEndSalary
+            })
+
+            const firstSal = growthPoints[0]?.salary || 0
+            const lastSal = growthPoints[growthPoints.length - 1]?.salary || 0
+            const totalGrowth = lastSal - firstSal
+            const totalGrowthRate = firstSal > 0 ? totalGrowth / firstSal : 0
+
+            return {
+              employeeId: emp.id,
+              employeeName: emp.name,
+              departmentName: bonusStore.getDepartmentById(emp.departmentId)?.name || '',
+              totalGrowthAmount: round2(totalGrowth),
+              totalGrowthRate: round2(totalGrowthRate),
+              growthPoints
+            }
+          })
+          .sort((a, b) => b.totalGrowthRate - a.totalGrowthRate)
+          .slice(0, 10)
+      : undefined
+
+    return {
+      generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      scope,
+      scopeId,
+      scopeName,
+      years: sortedYears,
+      comparisonPoints,
+      yearlySalaryData,
+      yearlyBonusData,
+      yearlyPerformanceData,
+      insights: {
+        overallSalaryGrowth: round2(overallSalaryGrowth),
+        overallBonusGrowth: round2(overallBonusGrowth),
+        overallCompGrowth: round2(overallCompGrowth),
+        cagrSalary: round2(cagrSalary),
+        cagrBonus: round2(cagrBonus),
+        cagrTotal: round2(cagrTotal),
+        keyFindings
+      },
+      departmentComparison: deptComparison,
+      topGrowers
+    }
+  }
+
+  function exportCrossYearReportHtml(report: CrossYearComparisonReport): string {
+    const { years, comparisonPoints, insights, yearlySalaryData, scopeName, topGrowers, departmentComparison } = report
+
+    const trendRows = comparisonPoints.map((p, i) => `
+      <tr>
+        <td style="font-weight:600">${p.label}</td>
+        <td style="text-align:right">${formatMoney(p.averageSalary)}</td>
+        <td style="text-align:right;color:${p.salaryGrowthRate >= 0 ? '#52c41a' : '#f5222d'}">${i === 0 ? '-' : (p.salaryGrowthRate >= 0 ? '+' : '') + (p.salaryGrowthRate * 100).toFixed(2)}%</td>
+        <td style="text-align:right">${formatMoney(p.averageBonus)}</td>
+        <td style="text-align:right;color:${p.bonusGrowthRate >= 0 ? '#52c41a' : '#f5222d'}">${i === 0 ? '-' : (p.bonusGrowthRate >= 0 ? '+' : '') + (p.bonusGrowthRate * 100).toFixed(2)}%</td>
+        <td style="text-align:right;font-weight:600">${formatMoney(p.averageTotalCompensation)}</td>
+        <td style="text-align:right;color:${p.totalCompGrowthRate >= 0 ? '#52c41a' : '#f5222d'}">${i === 0 ? '-' : (p.totalCompGrowthRate >= 0 ? '+' : '') + (p.totalCompGrowthRate * 100).toFixed(2)}%</td>
+        <td style="text-align:center">${p.headcount}</td>
+      </tr>
+    `).join('')
+
+    const salaryByYearRows = yearlySalaryData.map((d) => {
+      const categoryTotal = Object.values(d.adjustmentByCategory).reduce((s, v) => s + v, 0)
+      const categoryRows = Object.entries(d.adjustmentByCategory)
+        .filter(([, v]) => v > 0)
+        .map(([cat, amount]) => {
+          const pct = categoryTotal > 0 ? ((amount / categoryTotal) * 100).toFixed(1) : '0'
+          return `<tr><td>${CATEGORY_LABELS[cat as AdjustmentReasonCategory] || cat}</td><td style="text-align:right">${formatMoney(amount)}</td><td style="text-align:right">${pct}%</td></tr>`
+        }).join('')
+      const rowCount = Math.max(1, Object.values(d.adjustmentByCategory).filter(v => v > 0).length)
+      return `
+        <tr>
+          <td style="font-weight:600;vertical-align:top" rowspan="${rowCount}">${d.year}年</td>
+          ${categoryRows || '<td colspan="2" style="text-align:center;color:#bfbfbf">暂无调薪记录</td>'}
+        </tr>
+      `
+    }).join('')
+
+    const topGrowerRows = topGrowers?.map((e, i) => `
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${e.employeeName}</td>
+        <td>${e.departmentName}</td>
+        <td style="text-align:right">${formatMoney(e.growthPoints[0]?.salary || 0)}</td>
+        <td style="text-align:right">${formatMoney(e.growthPoints[e.growthPoints.length - 1]?.salary || 0)}</td>
+        <td style="text-align:right;color:#52c41a;font-weight:600">+${formatMoney(e.totalGrowthAmount)}</td>
+        <td style="text-align:right;color:#52c41a;font-weight:600">+${(e.totalGrowthRate * 100).toFixed(2)}%</td>
+      </tr>
+    `).join('') || ''
+
+    const deptCompRows = departmentComparison?.map((d) => {
+      const firstP = d.points[0]
+      const lastP = d.points[d.points.length - 1]
+      const growth = firstP && lastP && firstP.averageSalary > 0
+        ? ((lastP.averageSalary - firstP.averageSalary) / firstP.averageSalary * 100).toFixed(2)
+        : '0'
+      return `
+        <tr>
+          <td style="font-weight:600">${d.departmentName}</td>
+          <td style="text-align:right">${formatMoney(firstP?.averageSalary || 0)}</td>
+          <td style="text-align:right">${formatMoney(lastP?.averageSalary || 0)}</td>
+          <td style="text-align:right;color:${Number(growth) >= 0 ? '#52c41a' : '#f5222d'};font-weight:600">${Number(growth) >= 0 ? '+' : ''}${growth}%</td>
+          <td style="text-align:right">${formatMoney(lastP?.totalCompCost || 0)}</td>
+          <td style="text-align:center">${lastP?.headcount || 0}</td>
+        </tr>
+      `
+    }).join('') || ''
+
+    const findingItems = insights.keyFindings.map((f) => `<li>${f}</li>`).join('')
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>跨年度薪资增长趋势对比报告_${scopeName}_${dayjs().format('YYYYMMDD')}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.6; font-size: 12px; }
+  .header { text-align: center; padding: 16px 0 12px; border-bottom: 3px solid #2080f0; margin-bottom: 16px; }
+  .header h1 { font-size: 22px; color: #2080f0; margin-bottom: 4px; }
+  .header p { color: #8c8c8c; font-size: 12px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .summary-card { text-align: center; padding: 12px; border-radius: 8px; background: #f6f8fa; }
+  .summary-card .label { font-size: 11px; color: #8c8c8c; margin-bottom: 4px; }
+  .summary-card .value { font-size: 18px; font-weight: 700; color: #262626; }
+  .sc-growth { background: #e6f7ff; }
+  .sc-cagr { background: #f9f0ff; }
+  .sc-total { background: #fff7e6; }
+  h2 { font-size: 15px; color: #262626; margin: 16px 0 10px; padding-left: 8px; border-left: 3px solid #2080f0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+  th, td { border: 1px solid #e8e8e8; padding: 6px 10px; text-align: left; }
+  th { background: #fafafa; font-weight: 600; color: #595959; white-space: nowrap; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .findings { background: #f6ffed; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+  .findings h3 { color: #389e0d; font-size: 13px; margin-bottom: 8px; }
+  .findings ul { padding-left: 20px; }
+  .findings li { margin-bottom: 4px; }
+  .footer { text-align: center; color: #bfbfbf; font-size: 10px; margin-top: 24px; padding-top: 10px; border-top: 1px solid #e8e8e8; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>跨年度薪资增长趋势对比报告</h1>
+  <p>统计范围：${scopeName} · 对比年度：${years.join(' / ')} · 生成时间：${report.generatedAt}</p>
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card sc-growth">
+    <div class="label">累计薪资增长率</div>
+    <div class="value" style="color:#52c41a">${insights.overallSalaryGrowth >= 0 ? '+' : ''}${(insights.overallSalaryGrowth * 100).toFixed(2)}%</div>
+  </div>
+  <div class="summary-card sc-cagr">
+    <div class="label">薪资复合年增长率</div>
+    <div class="value" style="color:#722ed1">${(insights.cagrSalary * 100).toFixed(2)}%</div>
+  </div>
+  <div class="summary-card sc-total">
+    <div class="label">累计奖金增长率</div>
+    <div class="value" style="color:#fa8c16">${insights.overallBonusGrowth >= 0 ? '+' : ''}${(insights.overallBonusGrowth * 100).toFixed(2)}%</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">累计薪酬总包增长</div>
+    <div class="value" style="color:#1890ff">${insights.overallCompGrowth >= 0 ? '+' : ''}${(insights.overallCompGrowth * 100).toFixed(2)}%</div>
+  </div>
+</div>
+
+<div class="findings">
+  <h3>📊 核心发现</h3>
+  <ul>${findingItems || '<li>暂无数据</li>'}</ul>
+</div>
+
+<h2>一、年度薪酬趋势对比</h2>
+<table>
+  <thead>
+    <tr>
+      <th>年度</th>
+      <th style="text-align:right">平均月薪</th>
+      <th style="text-align:right">薪资同比</th>
+      <th style="text-align:right">平均奖金</th>
+      <th style="text-align:right">奖金同比</th>
+      <th style="text-align:right">年度人均总包</th>
+      <th style="text-align:right">总包同比</th>
+      <th style="text-align:center">员工人数</th>
+    </tr>
+  </thead>
+  <tbody>${trendRows}</tbody>
+</table>
+
+${departmentComparison && departmentComparison.length > 0 ? `
+<h2>二、部门薪资增长对比</h2>
+<table>
+  <thead>
+    <tr>
+      <th>部门</th>
+      <th style="text-align:right">${years[0]}年平均月薪</th>
+      <th style="text-align:right">${years[years.length - 1]}年平均月薪</th>
+      <th style="text-align:right">累计涨幅</th>
+      <th style="text-align:right">最新年度薪酬成本</th>
+      <th style="text-align:center">当前人数</th>
+    </tr>
+  </thead>
+  <tbody>${deptCompRows}</tbody>
+</table>
+` : ''}
+
+<h2>三、各年度调薪事由分布</h2>
+<table>
+  <thead>
+    <tr>
+      <th>年度</th>
+      <th>调薪事由</th>
+      <th style="text-align:right">调薪金额</th>
+      <th style="text-align:right">占比</th>
+    </tr>
+  </thead>
+  <tbody>${salaryByYearRows}</tbody>
+</table>
+
+${topGrowers && topGrowers.length > 0 ? `
+<h2>四、薪资增长 TOP10 员工</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:center">排名</th>
+      <th>姓名</th>
+      <th>部门</th>
+      <th style="text-align:right">起始薪资</th>
+      <th style="text-align:right">最新薪资</th>
+      <th style="text-align:right">增长金额</th>
+      <th style="text-align:right">增长率</th>
+    </tr>
+  </thead>
+  <tbody>${topGrowerRows}</tbody>
+</table>
+` : ''}
+
+<div class="footer">
+  本文档由「年终奖模拟器」系统自动生成 · ${report.generatedAt}
+</div>
+
+</body>
+</html>`
+  }
+
   return {
     reasons,
     approvalWorkflow,
@@ -1886,6 +2487,12 @@ ${topBonus.length > 0 ? `
     buildEmployeeAnnualReview,
     buildDepartmentAnnualReview,
     buildAnnualReviewReport,
-    exportReviewReportHtml
+    exportReviewReportHtml,
+    syncCompensationArchiveOnApproval,
+    getYearlySalaryGrowthData,
+    getYearlyBonusData,
+    getYearlyPerformanceData,
+    buildCrossYearComparisonReport,
+    exportCrossYearReportHtml
   }
 })

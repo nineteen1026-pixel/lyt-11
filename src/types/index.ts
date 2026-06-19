@@ -705,3 +705,81 @@ export interface BonusSandboxModuleData {
   activeScenarioIds: string[]
 }
 
+export interface YearlySalaryGrowthData {
+  year: number
+  startSalary: number
+  endSalary: number
+  totalAdjustmentAmount: number
+  adjustmentCount: number
+  averageAdjustmentRatio: number
+  highestAdjustment: number
+  lowestAdjustment: number
+  adjustmentByCategory: Record<AdjustmentReasonCategory, number>
+  headcount: number
+}
+
+export interface YearlyBonusData {
+  year: number
+  totalBonusGross: number
+  totalBonusNet: number
+  averageBonus: number
+  bonusCount: number
+  bonusByType: Record<string, number>
+}
+
+export interface YearlyPerformanceData {
+  year: number
+  totalReviews: number
+  distribution: Record<string, number>
+  averageCoefficient: number
+}
+
+export interface CrossYearComparisonPoint {
+  year: number
+  label: string
+  averageSalary: number
+  averageBonus: number
+  averageTotalCompensation: number
+  salaryGrowthRate: number
+  bonusGrowthRate: number
+  totalCompGrowthRate: number
+  headcount: number
+  totalSalaryCost: number
+  totalBonusCost: number
+  totalCompCost: number
+}
+
+export interface CrossYearComparisonReport {
+  generatedAt: string
+  scope: 'company' | 'department' | 'employee'
+  scopeId?: string
+  scopeName?: string
+  years: number[]
+  comparisonPoints: CrossYearComparisonPoint[]
+  yearlySalaryData: YearlySalaryGrowthData[]
+  yearlyBonusData: YearlyBonusData[]
+  yearlyPerformanceData: YearlyPerformanceData[]
+  insights: {
+    overallSalaryGrowth: number
+    overallBonusGrowth: number
+    overallCompGrowth: number
+    cagrSalary: number
+    cagrBonus: number
+    cagrTotal: number
+    keyFindings: string[]
+  }
+  departmentComparison?: {
+    departmentId: string
+    departmentName: string
+    points: CrossYearComparisonPoint[]
+  }[]
+  topGrowers?: {
+    employeeId: string
+    employeeName: string
+    departmentName: string
+    totalGrowthAmount: number
+    totalGrowthRate: number
+    growthPoints: { year: number; salary: number; growthRate: number }[]
+  }[]
+}
+
