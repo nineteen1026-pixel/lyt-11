@@ -31,7 +31,10 @@ import type {
   YearlyBonusData,
   YearlyPerformanceData,
   CrossYearComparisonPoint,
-  CrossYearComparisonReport
+  CrossYearComparisonReport,
+  MarketBenchmarkData,
+  SalaryCompetitivenessAssessment,
+  CompetitivenessLevel
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -221,6 +224,340 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
   }
 
   initMockHistoryData()
+
+  const marketBenchmarkData = ref<MarketBenchmarkData[]>(initMockMarketBenchmarkData())
+
+  function initMockMarketBenchmarkData(): MarketBenchmarkData[] {
+    const year = dayjs().year()
+    const benchmarks: MarketBenchmarkData[] = [
+      {
+        id: generateId(),
+        position: '技术总监',
+        positionLevel: 'P8',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 25000, p25: 30000, p50: 38000, p75: 48000, p90: 60000 },
+        totalCompensation: { p10: 400000, p25: 500000, p50: 650000, p75: 850000, p90: 1100000 },
+        bonusRange: { min: 100000, max: 400000, median: 200000 },
+        salaryGrowthRange: { min: 0.05, max: 0.25, median: 0.12 },
+        dataSource: '猎聘网年度薪酬报告',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '高级工程师',
+        positionLevel: 'P6',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 18000, p25: 21000, p50: 26000, p75: 32000, p90: 40000 },
+        totalCompensation: { p10: 280000, p25: 340000, p50: 430000, p75: 550000, p90: 700000 },
+        bonusRange: { min: 50000, max: 200000, median: 100000 },
+        salaryGrowthRange: { min: 0.08, max: 0.3, median: 0.15 },
+        dataSource: '拉勾网互联网薪酬白皮书',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '中级工程师',
+        positionLevel: 'P5',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 12000, p25: 14500, p50: 18000, p75: 22000, p90: 27000 },
+        totalCompensation: { p10: 180000, p25: 220000, p50: 280000, p75: 350000, p90: 440000 },
+        bonusRange: { min: 30000, max: 100000, median: 60000 },
+        salaryGrowthRange: { min: 0.1, max: 0.25, median: 0.15 },
+        dataSource: 'BOSS直聘技术岗薪酬报告',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '市场总监',
+        positionLevel: 'M3',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 22000, p25: 26000, p50: 33000, p75: 42000, p90: 55000 },
+        totalCompensation: { p10: 350000, p25: 430000, p50: 560000, p75: 750000, p90: 1000000 },
+        bonusRange: { min: 80000, max: 350000, median: 180000 },
+        salaryGrowthRange: { min: 0.06, max: 0.22, median: 0.11 },
+        dataSource: '脉脉市场岗薪酬调研',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '市场经理',
+        positionLevel: 'M2',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 14000, p25: 16500, p50: 20000, p75: 25000, p90: 31000 },
+        totalCompensation: { p10: 220000, p25: 265000, p50: 330000, p75: 420000, p90: 530000 },
+        bonusRange: { min: 40000, max: 150000, median: 80000 },
+        salaryGrowthRange: { min: 0.08, max: 0.2, median: 0.12 },
+        dataSource: '前程无忧营销岗薪酬报告',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '运营总监',
+        positionLevel: 'M3',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 20000, p25: 24000, p50: 31000, p75: 40000, p90: 52000 },
+        totalCompensation: { p10: 320000, p25: 390000, p50: 520000, p75: 700000, p90: 950000 },
+        bonusRange: { min: 70000, max: 320000, median: 160000 },
+        salaryGrowthRange: { min: 0.05, max: 0.2, median: 0.1 },
+        dataSource: '拉勾网运营岗薪酬白皮书',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      },
+      {
+        id: generateId(),
+        position: '运营专员',
+        positionLevel: 'P4',
+        city: '北京',
+        industry: '互联网',
+        year,
+        baseSalary: { p10: 8000, p25: 9500, p50: 12000, p75: 15000, p90: 19000 },
+        totalCompensation: { p10: 110000, p25: 135000, p50: 175000, p75: 225000, p90: 290000 },
+        bonusRange: { min: 15000, max: 60000, median: 35000 },
+        salaryGrowthRange: { min: 0.1, max: 0.25, median: 0.15 },
+        dataSource: '智联招聘运营岗薪酬报告',
+        updatedAt: dayjs().format('YYYY-MM-DD')
+      }
+    ]
+    return benchmarks
+  }
+
+  function getMarketBenchmarkByPosition(position: string, year?: number): MarketBenchmarkData | undefined {
+    const targetYear = year || dayjs().year()
+    let benchmark = marketBenchmarkData.value.find(
+      (b) => b.position === position && b.year === targetYear
+    )
+    if (!benchmark) {
+      benchmark = marketBenchmarkData.value.find((b) => b.position === position)
+    }
+    if (!benchmark) {
+      const allPositions = marketBenchmarkData.value.map((b) => b.position)
+      const similarPosition = allPositions.find((p) => position.includes(p) || p.includes(position))
+      if (similarPosition) {
+        benchmark = marketBenchmarkData.value.find((b) => b.position === similarPosition)
+      }
+    }
+    return benchmark
+  }
+
+  function calculatePercentile(value: number, p10: number, p25: number, p50: number, p75: number, p90: number): number {
+    if (value <= p10) return 10
+    if (value <= p25) return 10 + ((value - p10) / (p25 - p10)) * 15
+    if (value <= p50) return 25 + ((value - p25) / (p50 - p25)) * 25
+    if (value <= p75) return 50 + ((value - p50) / (p75 - p50)) * 25
+    if (value <= p90) return 75 + ((value - p75) / (p90 - p75)) * 15
+    return 95
+  }
+
+  function getCompetitivenessLevel(percentile: number): CompetitivenessLevel {
+    if (percentile < 20) return 'far_below'
+    if (percentile < 40) return 'below'
+    if (percentile < 60) return 'at_market'
+    if (percentile < 80) return 'above'
+    return 'far_above'
+  }
+
+  function getCompetitivenessLevelLabel(level: CompetitivenessLevel): string {
+    const labels: Record<CompetitivenessLevel, string> = {
+      far_below: '远低于市场',
+      below: '低于市场',
+      at_market: '符合市场水平',
+      above: '高于市场',
+      far_above: '远高于市场'
+    }
+    return labels[level]
+  }
+
+  function getCompetitivenessLevelColor(level: CompetitivenessLevel): string {
+    const colors: Record<CompetitivenessLevel, string> = {
+      far_below: '#f5222d',
+      below: '#fa8c16',
+      at_market: '#1890ff',
+      above: '#52c41a',
+      far_above: '#722ed1'
+    }
+    return colors[level]
+  }
+
+  function calculateSalaryCompetitiveness(
+    employeeId: string,
+    year: number
+  ): SalaryCompetitivenessAssessment | undefined {
+    const emp = bonusStore.getEmployeeById(employeeId)
+    if (!emp) return undefined
+
+    const benchmark = getMarketBenchmarkByPosition(emp.position, year)
+    if (!benchmark) return undefined
+
+    const salaryHistory = getEmployeeHistory(employeeId)
+    const yearHistory = salaryHistory.filter((h) => dayjs(h.effectiveDate).year() === year)
+
+    const trend = getEmployeeSalaryTrend(employeeId, year)
+    const endSalary = trend.length > 0 ? trend[trend.length - 1].baseSalary : emp.baseSalary
+    const startSalary = trend.length > 0 ? trend[0].baseSalary : emp.baseSalary
+
+    const bonusTrend = getEmployeeBonusTrend(employeeId, year)
+    const totalBonus = bonusTrend.reduce((sum, b) => sum + b.grossAmount, 0)
+    const totalCompensation = endSalary * 12 + totalBonus
+
+    const baseSalaryPercentile = round2(
+      calculatePercentile(
+        endSalary,
+        benchmark.baseSalary.p10,
+        benchmark.baseSalary.p25,
+        benchmark.baseSalary.p50,
+        benchmark.baseSalary.p75,
+        benchmark.baseSalary.p90
+      )
+    )
+
+    const totalCompPercentile = round2(
+      calculatePercentile(
+        totalCompensation,
+        benchmark.totalCompensation.p10,
+        benchmark.totalCompensation.p25,
+        benchmark.totalCompensation.p50,
+        benchmark.totalCompensation.p75,
+        benchmark.totalCompensation.p90
+      )
+    )
+
+    const competitivenessLevel = getCompetitivenessLevel(baseSalaryPercentile)
+
+    const adjustmentCount = yearHistory.length
+    const totalAdjustmentAmount = yearHistory.reduce((sum, h) => sum + h.adjustmentAmount, 0)
+    const avgAdjustmentRatio =
+      adjustmentCount > 0
+        ? yearHistory.reduce((sum, h) => sum + h.adjustmentRatio, 0) / adjustmentCount
+        : 0
+    const marketGrowthRate = benchmark.salaryGrowthRange.median
+    const personalGrowthRate = startSalary > 0 ? (endSalary - startSalary) / startSalary : 0
+    const vsMarketGrowth = round2(personalGrowthRate - marketGrowthRate)
+
+    const gapAmount = round2(benchmark.baseSalary.p50 - endSalary)
+    const gapPercent = round2(benchmark.baseSalary.p50 > 0 ? gapAmount / benchmark.baseSalary.p50 : 0)
+    const projectedGap1Y = round2(gapAmount * (1 + marketGrowthRate) - endSalary * personalGrowthRate)
+    const projectedGap2Y = round2(
+      gapAmount * Math.pow(1 + marketGrowthRate, 2) - endSalary * personalGrowthRate * 2
+    )
+
+    const recommendations: string[] = []
+    let riskLevel: 'low' | 'medium' | 'high' = 'low'
+    let retentionRisk = '低'
+
+    const perfHistory = getEmployeePerformanceHistory(employeeId)
+    const latestPerf = perfHistory.length > 0 ? perfHistory[0] : null
+    const perfLevel = latestPerf?.levelName || 'B'
+
+    if (competitivenessLevel === 'far_below') {
+      riskLevel = 'high'
+      retentionRisk = '高'
+      recommendations.push(
+        `当前薪资仅为市场分位的 ${baseSalaryPercentile}%，存在较高的流失风险，建议立即进行市场对标调薪`
+      )
+      if (['S', 'A+', 'A'].includes(perfLevel)) {
+        recommendations.push(`该员工绩效评级为 ${perfLevel}，属于高绩效员工，建议优先调薪至市场 P50 以上，预计需调薪 ${formatMoney(Math.max(0, gapAmount))}`)
+      }
+    } else if (competitivenessLevel === 'below') {
+      riskLevel = 'medium'
+      retentionRisk = '中'
+      recommendations.push(
+        `当前薪资低于市场水平（分位 ${baseSalaryPercentile}%），建议在年度调薪中优先考虑，逐步提升至市场 P50 水平`
+      )
+      if (['S', 'A+'].includes(perfLevel)) {
+        riskLevel = 'high'
+        retentionRisk = '高'
+        recommendations.push(`高绩效员工薪资低于市场水平，建议紧急调薪，调薪幅度建议不低于 ${Math.max(0.08, gapPercent * 1.2).toFixed(0)}%`)
+      }
+    } else if (competitivenessLevel === 'at_market') {
+      riskLevel = 'low'
+      retentionRisk = '低'
+      recommendations.push(
+        `当前薪资符合市场水平（分位 ${baseSalaryPercentile}%），建议保持正常年度调薪节奏，调薪幅度参考市场增长率 ${(marketGrowthRate * 100).toFixed(1)}%`
+      )
+      if (['S', 'A+'].includes(perfLevel)) {
+        recommendations.push(`高绩效员工可考虑调薪至市场 P75 水平，以强化激励效果`)
+      }
+    } else if (competitivenessLevel === 'above') {
+      riskLevel = 'low'
+      retentionRisk = '很低'
+      recommendations.push(
+        `当前薪资高于市场水平（分位 ${baseSalaryPercentile}%），薪酬竞争力较强，建议保持现有水平，可通过奖金等非现金方式进行激励`
+      )
+    } else {
+      riskLevel = 'low'
+      retentionRisk = '极低'
+      recommendations.push(
+        `当前薪资远高于市场水平（分位 ${baseSalaryPercentile}%），薪酬极具竞争力，建议关注投入产出比，可考虑以非物质激励为主`
+      )
+    }
+
+    if (personalGrowthRate < marketGrowthRate && adjustmentCount > 0) {
+      recommendations.push(
+        `过去一年个人薪资增长 ${(personalGrowthRate * 100).toFixed(1)}%，低于市场平均增长率 ${(marketGrowthRate * 100).toFixed(1)}%，建议在下一调薪周期补足差距`
+      )
+    }
+
+    if (totalCompPercentile < baseSalaryPercentile - 10) {
+      recommendations.push(
+        `年度总包市场分位（${totalCompPercentile}%）低于月薪分位（${baseSalaryPercentile}%），建议优化奖金结构，提升整体薪酬竞争力`
+      )
+    }
+
+    return {
+      employeeId: emp.id,
+      employeeName: emp.name,
+      position: emp.position,
+      year,
+      baseSalary: endSalary,
+      baseSalaryPercentile,
+      baseSalaryVsMarket: {
+        vsP10: round2(endSalary / benchmark.baseSalary.p10 - 1),
+        vsP25: round2(endSalary / benchmark.baseSalary.p25 - 1),
+        vsP50: round2(endSalary / benchmark.baseSalary.p50 - 1),
+        vsP75: round2(endSalary / benchmark.baseSalary.p75 - 1),
+        vsP90: round2(endSalary / benchmark.baseSalary.p90 - 1)
+      },
+      totalCompensation,
+      totalCompensationPercentile: totalCompPercentile,
+      totalCompensationVsMarket: {
+        vsP10: round2(totalCompensation / benchmark.totalCompensation.p10 - 1),
+        vsP25: round2(totalCompensation / benchmark.totalCompensation.p25 - 1),
+        vsP50: round2(totalCompensation / benchmark.totalCompensation.p50 - 1),
+        vsP75: round2(totalCompensation / benchmark.totalCompensation.p75 - 1),
+        vsP90: round2(totalCompensation / benchmark.totalCompensation.p90 - 1)
+      },
+      competitivenessLevel,
+      historicalAdjustments: {
+        count: adjustmentCount,
+        totalAmount: round2(totalAdjustmentAmount),
+        averageRatio: round2(avgAdjustmentRatio),
+        vsMarketGrowth
+      },
+      marketGrowthRate: round2(marketGrowthRate),
+      personalGrowthRate: round2(personalGrowthRate),
+      gapAnalysis: {
+        currentGapAmount: gapAmount,
+        currentGapPercent: gapPercent,
+        projectedGapIn1Year: projectedGap1Y,
+        projectedGapIn2Year: projectedGap2Y
+      },
+      recommendations,
+      riskLevel,
+      retentionRisk,
+      benchmarkData: benchmark
+    }
+  }
 
   function createInitialBudget(): AnnualSalaryBudget {
     const deptBudgets: DepartmentSalaryBudget[] = bonusStore.departments.map((dept) => {
@@ -1351,6 +1688,21 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       recommendation = '绩效有所下滑，建议关注能力提升计划'
     }
 
+    const marketBenchmark = getMarketBenchmarkByPosition(emp.position, year)
+    const competitiveness = calculateSalaryCompetitiveness(emp.id, year)
+
+    let marketPositionText = '暂无市场对标数据'
+    let competitivenessText = '-'
+
+    if (competitiveness) {
+      marketPositionText = `市场分位 ${competitiveness.baseSalaryPercentile}%，${getCompetitivenessLevelLabel(competitiveness.competitivenessLevel)}`
+      competitivenessText = getCompetitivenessLevelLabel(competitiveness.competitivenessLevel)
+
+      if (competitiveness.gapAnalysis.currentGapAmount > 0) {
+        recommendation = `与市场中位数差距 ${formatMoney(competitiveness.gapAnalysis.currentGapAmount)}（${(competitiveness.gapAnalysis.currentGapPercent * 100).toFixed(1)}%），${recommendation}`
+      }
+    }
+
     return {
       employeeId: emp.id,
       employeeName: emp.name,
@@ -1364,11 +1716,15 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       bonusTrend,
       performanceTrend,
       summary,
+      marketBenchmark: marketBenchmark || undefined,
+      competitiveness: competitiveness || undefined,
       insights: {
         salaryPosition: `全公司前 ${(salaryPercentile * 100).toFixed(0)}%`,
         bonusPosition: `全公司前 ${(bonusPercentile * 100).toFixed(0)}%`,
         performanceTrend: perfTrendText,
-        recommendation
+        recommendation,
+        marketPosition: marketPositionText,
+        competitiveness: competitivenessText
       }
     }
   }
@@ -2441,6 +2797,7 @@ ${topGrowers && topGrowers.length > 0 ? `
     approvedRequests,
     rejectedRequests,
     budgetOverview,
+    marketBenchmarkData,
     CATEGORY_LABELS,
     STATUS_LABELS,
     NODE_TYPE_LABELS,
@@ -2456,6 +2813,12 @@ ${topGrowers && topGrowers.length > 0 ? `
     getEventTypeLabel,
     getEventTypeColor,
     getBonusTypeLabel,
+    getMarketBenchmarkByPosition,
+    calculatePercentile,
+    getCompetitivenessLevel,
+    getCompetitivenessLevelLabel,
+    getCompetitivenessLevelColor,
+    calculateSalaryCompetitiveness,
     addReason,
     updateReason,
     removeReason,

@@ -593,6 +593,83 @@ export interface AnnualCompensationSummary {
   lowestPerformanceLevel: string
 }
 
+export interface MarketSalaryPercentile {
+  p10: number
+  p25: number
+  p50: number
+  p75: number
+  p90: number
+}
+
+export interface MarketBenchmarkData {
+  id: string
+  position: string
+  positionLevel: string
+  city: string
+  industry: string
+  year: number
+  baseSalary: MarketSalaryPercentile
+  totalCompensation: MarketSalaryPercentile
+  bonusRange: {
+    min: number
+    max: number
+    median: number
+  }
+  salaryGrowthRange: {
+    min: number
+    max: number
+    median: number
+  }
+  dataSource: string
+  updatedAt: string
+}
+
+export type CompetitivenessLevel = 'far_below' | 'below' | 'at_market' | 'above' | 'far_above'
+
+export interface SalaryCompetitivenessAssessment {
+  employeeId: string
+  employeeName: string
+  position: string
+  year: number
+  baseSalary: number
+  baseSalaryPercentile: number
+  baseSalaryVsMarket: {
+    vsP10: number
+    vsP25: number
+    vsP50: number
+    vsP75: number
+    vsP90: number
+  }
+  totalCompensation: number
+  totalCompensationPercentile: number
+  totalCompensationVsMarket: {
+    vsP10: number
+    vsP25: number
+    vsP50: number
+    vsP75: number
+    vsP90: number
+  }
+  competitivenessLevel: CompetitivenessLevel
+  historicalAdjustments: {
+    count: number
+    totalAmount: number
+    averageRatio: number
+    vsMarketGrowth: number
+  }
+  marketGrowthRate: number
+  personalGrowthRate: number
+  gapAnalysis: {
+    currentGapAmount: number
+    currentGapPercent: number
+    projectedGapIn1Year: number
+    projectedGapIn2Year: number
+  }
+  recommendations: string[]
+  riskLevel: 'low' | 'medium' | 'high'
+  retentionRisk: string
+  benchmarkData: MarketBenchmarkData
+}
+
 export interface EmployeeAnnualReview {
   employeeId: string
   employeeName: string
@@ -606,11 +683,15 @@ export interface EmployeeAnnualReview {
   bonusTrend: BonusTrendPoint[]
   performanceTrend: PerformanceTrendPoint[]
   summary: AnnualCompensationSummary
+  marketBenchmark?: MarketBenchmarkData
+  competitiveness?: SalaryCompetitivenessAssessment
   insights: {
     salaryPosition: string
     bonusPosition: string
     performanceTrend: string
     recommendation: string
+    marketPosition?: string
+    competitiveness?: string
   }
 }
 
