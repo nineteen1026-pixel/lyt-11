@@ -15,7 +15,18 @@ import type {
   PerformanceDistributionRatio,
   CalibrationResult,
   CalibrationEmployee,
-  CalibrationScope
+  CalibrationScope,
+  BonusPlanVersion,
+  BonusPlanVersionSnapshot,
+  BonusPlanVersionDiff,
+  VersionApprovalRecord,
+  BonusConfirmationRecord,
+  BonusConfirmationBatch,
+  TimeoutWarning,
+  BonusSandboxScenario,
+  SandboxKeyMetrics,
+  SandboxLevelDistribution,
+  EmployeeTagExpiryWarning
 } from '@/types'
 import {
   generateId,
@@ -65,11 +76,11 @@ export const useBonusStore = defineStore('bonus', () => {
   initDistributionRatios()
 
   const employeeTags = ref<EmployeeTag[]>([
-    { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d' },
-    { id: generateId(), name: '关键岗位', coefficient: 0.2, description: '担任关键岗位的员工', color: '#fa8c16' },
-    { id: generateId(), name: '新人', coefficient: 0.05, description: '入职不满一年的新员工', color: '#52c41a' },
-    { id: generateId(), name: '管理干部', coefficient: 0.15, description: '承担管理职责的员工', color: '#1890ff' },
-    { id: generateId(), name: '技术骨干', coefficient: 0.25, description: '技术领域深度贡献者', color: '#722ed1' }
+    { id: generateId(), name: '核心人才', coefficient: 0.3, description: '对公司业务有重大贡献的核心人员', color: '#f5222d', effectiveDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), expiryDate: dayjs().add(365, 'day').format('YYYY-MM-DD') },
+    { id: generateId(), name: '关键岗位', coefficient: 0.2, description: '担任关键岗位的员工', color: '#fa8c16', effectiveDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), expiryDate: dayjs().add(365, 'day').format('YYYY-MM-DD') },
+    { id: generateId(), name: '新人', coefficient: 0.05, description: '入职不满一年的新员工', color: '#52c41a', effectiveDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), expiryDate: dayjs().add(365, 'day').format('YYYY-MM-DD') },
+    { id: generateId(), name: '管理干部', coefficient: 0.15, description: '承担管理职责的员工', color: '#1890ff', effectiveDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), expiryDate: dayjs().add(365, 'day').format('YYYY-MM-DD') },
+    { id: generateId(), name: '技术骨干', coefficient: 0.25, description: '技术领域深度贡献者', color: '#722ed1', effectiveDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), expiryDate: dayjs().add(365, 'day').format('YYYY-MM-DD') }
   ])
 
   const dept1Id = generateId()
@@ -372,8 +383,21 @@ export const useBonusStore = defineStore('bonus', () => {
     return salaryAdjustmentImpacts.value.filter((i) => i.id.startsWith(employeeId + '_'))
   }
 
-  function calculateWeightedBaseSalary(employee: Employee, year: number): number {
-    const allImpacts = getEmployeeImpacts(employee.id)
+  function calculateWeightedBaseSalary(employee: Employee, year: number, pendingAdjustment?: { effectiveDate: string; oldSalary: number; newSalary: number }): number {
+    let allImpacts = getEmployeeImpacts(employee.id)
+    if (pendingAdjustment) {
+      const tempImpact: BonusImpactSource = {
+        id: `${employee.id}_pending_${generateId()}`,
+        type: 'salary_adjustment',
+        name: '待生效调薪',
+        description: '待生效调薪',
+        effectiveDate: pendingAdjustment.effectiveDate,
+        oldValue: pendingAdjustment.oldSalary,
+        newValue: pendingAdjustment.newSalary,
+        impactAmount: 0
+      }
+      allImpacts = [...allImpacts, tempImpact]
+    }
     if (allImpacts.length === 0) {
       return employee.baseSalary
     }
@@ -461,15 +485,82 @@ export const useBonusStore = defineStore('bonus', () => {
     return map
   })
 
-  function calculateEmployeeBaseAmount(employee: Employee, useWeighted: boolean = true): number {
+  function calculateEmployeeBaseAmount(employee: Employee, useWeighted: boolean = true, pendingAdjustment?: { effectiveDate: string; oldSalary: number; newSalary: number }): number {
     const salary = useWeighted
-      ? calculateWeightedBaseSalary(employee, bonusCalculationYear.value)
+      ? calculateWeightedBaseSalary(employee, bonusCalculationYear.value, pendingAdjustment)
       : employee.baseSalary
     const base = salary * bonusPool.value.baseRatio
     const performance = base * getPerformanceCoefficient(employee.performanceLevelId) * bonusPool.value.performanceRatio
     const tenure = base * Math.min(employee.yearsOfService * 0.05, 0.5) * bonusPool.value.tenureRatio
     const tagBonus = base * getTagCoefficient(employee.tagIds)
     return round2(base + performance + tenure + tagBonus)
+  }
+
+  function calculateAdjustedTenureBonus(employee: Employee, adjustedBase: number, totalAdjustmentRatio: number): number {
+    const adjustedTenureCoefficient = Math.min(
+      employee.yearsOfService * 0.05 + totalAdjustmentRatio * 0.5,
+      0.6
+    )
+    return round2(adjustedBase * adjustedTenureCoefficient * bonusPool.value.tenureRatio)
+  }
+
+  function calculateDynamicAnnualSalary(employee: Employee, year: number, pendingAdjustment?: { effectiveDate: string; oldSalary: number; newSalary: number }): number {
+    let allImpacts = getEmployeeImpacts(employee.id)
+    if (pendingAdjustment) {
+      const tempImpact: BonusImpactSource = {
+        id: `${employee.id}_pending_${generateId()}`,
+        type: 'salary_adjustment',
+        name: '待生效调薪',
+        description: '待生效调薪',
+        effectiveDate: pendingAdjustment.effectiveDate,
+        oldValue: pendingAdjustment.oldSalary,
+        newValue: pendingAdjustment.newSalary,
+        impactAmount: 0
+      }
+      allImpacts = [...allImpacts, tempImpact]
+    }
+
+    const sortedImpacts = [...allImpacts].sort((a, b) =>
+      dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf()
+    )
+
+    const yearStart = dayjs(`${year}-01-01`)
+    const yearEnd = dayjs(`${year}-12-31`)
+
+    let salaryAtYearStart = employee.baseSalary
+    for (const imp of sortedImpacts) {
+      if (dayjs(imp.effectiveDate).year() < year) {
+        salaryAtYearStart = imp.newValue
+      }
+    }
+
+    const yearImpacts = sortedImpacts.filter((i) => {
+      const d = dayjs(i.effectiveDate)
+      return d.year() === year && !d.isAfter(yearEnd)
+    })
+
+    let total = 0
+    let currentSalary = salaryAtYearStart
+    let periodStart = yearStart
+
+    for (const impact of yearImpacts) {
+      const impactDate = dayjs(impact.effectiveDate).startOf('month')
+      if (impactDate.isAfter(periodStart)) {
+        const months = impactDate.diff(periodStart, 'month')
+        if (months > 0) {
+          total += currentSalary * months
+        }
+      }
+      periodStart = impactDate
+      currentSalary = impact.newValue
+    }
+
+    const remainingMonths = yearEnd.endOf('month').diff(periodStart, 'month') + 1
+    if (remainingMonths > 0) {
+      total += currentSalary * remainingMonths
+    }
+
+    return round2(total)
   }
 
   const calculationResults = computed<PersonalCalculationResult[]>(() => {
@@ -934,7 +1025,9 @@ export const useBonusStore = defineStore('bonus', () => {
       bonusPool: bonusPool.value,
       comprehensiveIncome: comprehensiveIncome.value,
       performanceDistributionRatios: performanceDistributionRatios.value,
-      calibrationResults: calibrationResults.value
+      calibrationResults: calibrationResults.value,
+      bonusPlanVersions: bonusPlanVersions.value,
+      versionApprovalRecords: versionApprovalRecords.value
     }
   }
 
@@ -960,12 +1053,820 @@ export const useBonusStore = defineStore('bonus', () => {
         initDistributionRatios()
       }
       calibrationResults.value = data.calibrationResults || []
+      bonusPlanVersions.value = data.bonusPlanVersions || []
+      versionApprovalRecords.value = data.versionApprovalRecords || []
       currentCalibration.value = null
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
       return true
     } catch {
       return false
     }
+  }
+
+  const bonusPlanVersions = ref<BonusPlanVersion[]>([])
+  const versionApprovalRecords = ref<VersionApprovalRecord[]>([])
+
+  function generateVersionNo(): string {
+    if (bonusPlanVersions.value.length === 0) return 'v1.0.0'
+    const maxVersion = bonusPlanVersions.value.reduce((max, v) => {
+      const num = parseInt(v.versionNo.replace('v', '').split('.')[0])
+      return num > max ? num : max
+    }, 0)
+    return `v${maxVersion + 1}.0.0`
+  }
+
+  function createVersion(data: { name: string; description?: string; changeSummary: string }): BonusPlanVersion {
+    const snapshot: BonusPlanVersionSnapshot = {
+      bonusPool: JSON.parse(JSON.stringify(bonusPool.value)),
+      departments: JSON.parse(JSON.stringify(departments.value)),
+      performanceLevels: JSON.parse(JSON.stringify(performanceLevels.value)),
+      performanceDistributionRatios: JSON.parse(JSON.stringify(performanceDistributionRatios.value)),
+      employeeTags: JSON.parse(JSON.stringify(employeeTags.value))
+    }
+    const version: BonusPlanVersion = {
+      id: generateId(),
+      versionNo: generateVersionNo(),
+      name: data.name,
+      description: data.description || '',
+      snapshot,
+      status: 'draft',
+      createdBy: '系统管理员',
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      changeSummary: data.changeSummary,
+      isCurrent: bonusPlanVersions.value.length === 0
+    }
+    bonusPlanVersions.value.push(version)
+    return version
+  }
+
+  function getCurrentVersion(): BonusPlanVersion | null {
+    return bonusPlanVersions.value.find((v) => v.isCurrent) || null
+  }
+
+  function getVersionById(versionId: string): BonusPlanVersion | undefined {
+    return bonusPlanVersions.value.find((v) => v.id === versionId)
+  }
+
+  function getApprovalRecordsByVersionId(versionId: string): VersionApprovalRecord[] {
+    return versionApprovalRecords.value.filter((r) => r.versionId === versionId)
+  }
+
+  function compareWithCurrent(versionId: string): BonusPlanVersionDiff[] {
+    const current = getCurrentVersion()
+    if (!current) return []
+    return compareVersions(current.id, versionId) || []
+  }
+
+  function deepCompare(obj1: any, obj2: any, path: string = '', label: string = ''): BonusPlanVersionDiff[] {
+    const diffs: BonusPlanVersionDiff[] = []
+    if (obj1 === null && obj2 === null) return diffs
+    if (obj1 === null || obj2 === null) {
+      diffs.push({
+        field: path,
+        label: label || path,
+        oldValue: obj1,
+        newValue: obj2,
+        changeType: obj1 === null ? 'added' : 'removed',
+        path
+      })
+      return diffs
+    }
+    if (typeof obj1 !== 'object' || typeof obj2 !== 'object') {
+      diffs.push({
+        field: path,
+        label: label || path,
+        oldValue: obj1,
+        newValue: obj2,
+        changeType: obj1 === obj2 ? 'unchanged' : 'modified',
+        path
+      })
+      return diffs
+    }
+    if (Array.isArray(obj1) || Array.isArray(obj2)) {
+      const arr1 = Array.isArray(obj1) ? obj1 : []
+      const arr2 = Array.isArray(obj2) ? obj2 : []
+      diffs.push({
+        field: path,
+        label: label || path,
+        oldValue: arr1,
+        newValue: arr2,
+        changeType: JSON.stringify(arr1) === JSON.stringify(arr2) ? 'unchanged' : 'modified',
+        path
+      })
+      return diffs
+    }
+    const keys = new Set([...Object.keys(obj1), ...Object.keys(obj2)])
+    for (const key of keys) {
+      const newPath = path ? `${path}.${key}` : key
+      diffs.push(...deepCompare(obj1[key], obj2[key], newPath, key))
+    }
+    return diffs
+  }
+
+  function compareVersions(versionId1: string, versionId2: string): BonusPlanVersionDiff[] | null {
+    const v1 = getVersionById(versionId1)
+    const v2 = getVersionById(versionId2)
+    if (!v1 || !v2) return null
+    const diffs: BonusPlanVersionDiff[] = []
+    const s1 = v1.snapshot
+    const s2 = v2.snapshot
+    diffs.push(...deepCompare(s1.bonusPool, s2.bonusPool, 'bonusPool', '奖金池配置'))
+    diffs.push(...deepCompare(s1.performanceLevels, s2.performanceLevels, 'performanceLevels', '绩效等级'))
+    const deptRatios1 = s1.departments.map((d: Department) => ({ id: d.id, name: d.name, allocationRatio: d.allocationRatio }))
+    const deptRatios2 = s2.departments.map((d: Department) => ({ id: d.id, name: d.name, allocationRatio: d.allocationRatio }))
+    diffs.push(...deepCompare(deptRatios1, deptRatios2, 'departmentAllocations', '部门分配比例'))
+    diffs.push(...deepCompare(s1.employeeTags, s2.employeeTags, 'employeeTags', '员工标签系数'))
+    return diffs
+  }
+
+  function submitVersionForApproval(versionId: string): boolean {
+    const version = getVersionById(versionId)
+    if (!version || version.status !== 'draft') return false
+    const prevStatus = version.status
+    version.status = 'pending_approval'
+    version.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    versionApprovalRecords.value.push({
+      id: generateId(),
+      versionId,
+      action: 'submit',
+      operatorName: '系统管理员',
+      comment: '提交审批',
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      previousStatus: prevStatus,
+      newStatus: version.status
+    })
+    return true
+  }
+
+  function applyVersionSnapshot(version: BonusPlanVersion) {
+    const s = version.snapshot
+    bonusPool.value = JSON.parse(JSON.stringify(s.bonusPool))
+    performanceLevels.value = JSON.parse(JSON.stringify(s.performanceLevels))
+    employeeTags.value = JSON.parse(JSON.stringify(s.employeeTags))
+    if (s.performanceDistributionRatios && s.performanceDistributionRatios.length > 0) {
+      performanceDistributionRatios.value = JSON.parse(JSON.stringify(s.performanceDistributionRatios))
+    }
+    const deptMap: Record<string, Department> = {}
+    for (const d of s.departments) {
+      deptMap[d.id] = JSON.parse(JSON.stringify(d))
+    }
+    departments.value = departments.value.map((d) => {
+      if (deptMap[d.id]) {
+        return { ...deptMap[d.id], employees: d.employees }
+      }
+      return d
+    })
+  }
+
+  function approveVersion(versionId: string, comment?: string): boolean {
+    const version = getVersionById(versionId)
+    if (!version || version.status !== 'pending_approval') return false
+    const prevStatus = version.status
+    version.status = 'approved'
+    version.approvedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    version.approvedBy = '系统管理员'
+    version.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    for (const v of bonusPlanVersions.value) {
+      v.isCurrent = false
+    }
+    version.isCurrent = true
+    applyVersionSnapshot(version)
+    versionApprovalRecords.value.push({
+      id: generateId(),
+      versionId,
+      action: 'approve',
+      operatorName: '系统管理员',
+      comment: comment || '审批通过',
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      previousStatus: prevStatus,
+      newStatus: version.status
+    })
+    return true
+  }
+
+  function rejectVersion(versionId: string, reason: string): boolean {
+    const version = getVersionById(versionId)
+    if (!version || version.status !== 'pending_approval') return false
+    const prevStatus = version.status
+    version.status = 'rejected'
+    version.rejectionReason = reason
+    version.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    versionApprovalRecords.value.push({
+      id: generateId(),
+      versionId,
+      action: 'reject',
+      operatorName: '系统管理员',
+      comment: reason,
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      previousStatus: prevStatus,
+      newStatus: version.status
+    })
+    return true
+  }
+
+  function rollbackToVersion(versionId: string, reason: string): boolean {
+    const sourceVersion = getVersionById(versionId)
+    if (!sourceVersion) return false
+    const newVersion: BonusPlanVersion = {
+      id: generateId(),
+      versionNo: generateVersionNo(),
+      name: `回滚-${sourceVersion.name}`,
+      description: reason,
+      snapshot: JSON.parse(JSON.stringify(sourceVersion.snapshot)),
+      status: 'approved',
+      createdBy: '系统管理员',
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      approvedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      approvedBy: '系统管理员',
+      changeSummary: `回滚到版本 ${sourceVersion.versionNo}：${reason}`,
+      isCurrent: true,
+      rollbackFromVersionId: versionId
+    }
+    for (const v of bonusPlanVersions.value) {
+      v.isCurrent = false
+    }
+    bonusPlanVersions.value.push(newVersion)
+    applyVersionSnapshot(newVersion)
+    versionApprovalRecords.value.push({
+      id: generateId(),
+      versionId: newVersion.id,
+      action: 'rollback',
+      operatorName: '系统管理员',
+      comment: reason,
+      operatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      previousStatus: 'draft',
+      newStatus: 'approved'
+    })
+    return true
+  }
+
+  function deleteVersion(versionId: string): boolean {
+    const version = getVersionById(versionId)
+    if (!version || version.isCurrent) return false
+    if (version.status !== 'draft' && version.status !== 'rejected') return false
+    bonusPlanVersions.value = bonusPlanVersions.value.filter((v) => v.id !== versionId)
+    versionApprovalRecords.value = versionApprovalRecords.value.filter((r) => r.versionId !== versionId)
+    return true
+  }
+
+  const bonusConfirmations = ref<BonusConfirmationRecord[]>([])
+  const bonusConfirmationBatches = ref<BonusConfirmationBatch[]>([])
+
+  function createConfirmationBatch(data: { name: string; year: number; bonusName: string; deadlineDays: number }): BonusConfirmationBatch {
+    const batch: BonusConfirmationBatch = {
+      id: generateId(),
+      name: data.name,
+      year: data.year,
+      bonusName: data.bonusName,
+      status: 'draft',
+      deadlineDays: data.deadlineDays,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      totalConfirmations: allEmployees.value.length,
+      signedCount: 0,
+      objectedCount: 0,
+      pendingCount: 0,
+      timeoutCount: 0
+    }
+    bonusConfirmationBatches.value.push(batch)
+    return batch
+  }
+
+  function publishConfirmationBatch(batchId: string): boolean {
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+    if (!batch || batch.status !== 'draft') return false
+    batch.status = 'published'
+    batch.publishedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    let pendingCount = 0
+    for (const result of calculationResults.value) {
+      const emp = getEmployeeById(result.employeeId)
+      const dept = emp ? getDepartmentById(emp.departmentId) : null
+      const record: BonusConfirmationRecord = {
+        id: generateId(),
+        batchId,
+        employeeId: result.employeeId,
+        employeeName: result.employeeName,
+        departmentId: emp?.departmentId || '',
+        departmentName: dept?.name || result.departmentName,
+        position: emp?.position || '',
+        grossAmount: result.grossBonus,
+        taxAmount: result.taxOneTime,
+        netAmount: result.netBonusOneTime,
+        taxMethod: result.betterMethod,
+        status: 'pending',
+        createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        deadlineAt: dayjs().add(batch.deadlineDays, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        reminderCount: 0,
+        year: batch.year,
+        bonusName: batch.bonusName
+      }
+      bonusConfirmations.value.push(record)
+      pendingCount++
+    }
+    batch.pendingCount = pendingCount
+    return true
+  }
+
+  function deleteConfirmationBatch(batchId: string): boolean {
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+    if (!batch || batch.status !== 'draft') return false
+    bonusConfirmationBatches.value = bonusConfirmationBatches.value.filter((b) => b.id !== batchId)
+    bonusConfirmations.value = bonusConfirmations.value.filter((c) => c.batchId !== batchId)
+    return true
+  }
+
+  function checkTimeouts(): void {
+    const now = dayjs()
+    for (const record of bonusConfirmations.value) {
+      if (record.status === 'pending' && now.isAfter(dayjs(record.deadlineAt))) {
+        record.status = 'timeout'
+        const batch = bonusConfirmationBatches.value.find((b) => b.id === record.batchId)
+        if (batch) {
+          batch.pendingCount = Math.max(0, batch.pendingCount - 1)
+          batch.timeoutCount++
+        }
+      }
+    }
+  }
+
+  function getConfirmationsByBatch(batchId: string): BonusConfirmationRecord[] {
+    return bonusConfirmations.value.filter((c) => c.batchId === batchId)
+  }
+
+  function getConfirmationById(recordId: string): BonusConfirmationRecord | undefined {
+    return bonusConfirmations.value.find((c) => c.id === recordId)
+  }
+
+  function getConfirmationStatusLabel(status: string): string {
+    const map: Record<string, string> = {
+      pending: '待确认',
+      signed: '已签收',
+      objected: '已申诉',
+      reviewing: '复核中',
+      resolved_confirmed: '复核通过(维持)',
+      resolved_adjusted: '复核通过(已调整)',
+      expired: '已逾期',
+      timeout: '已逾期'
+    }
+    return map[status] || status
+  }
+
+  function getConfirmationStatusColor(status: string): string {
+    const map: Record<string, string> = {
+      pending: 'warning',
+      signed: 'success',
+      objected: 'error',
+      reviewing: 'info',
+      resolved_confirmed: 'success',
+      resolved_adjusted: 'success',
+      expired: 'default',
+      timeout: 'default'
+    }
+    return map[status] || 'default'
+  }
+
+  function updateBatchStats(batchId: string, prevStatus: string, newStatus: string) {
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+    if (!batch) return
+    const decrMap: Record<string, keyof BonusConfirmationBatch> = {
+      pending: 'pendingCount',
+      signed: 'signedCount',
+      objected: 'objectedCount',
+      timeout: 'timeoutCount'
+    }
+    const incrMap: Record<string, keyof BonusConfirmationBatch> = {
+      pending: 'pendingCount',
+      signed: 'signedCount',
+      objected: 'objectedCount',
+      timeout: 'timeoutCount'
+    }
+    const decrKey = decrMap[prevStatus]
+    const incrKey = incrMap[newStatus]
+    if (decrKey) (batch[decrKey] as number) = Math.max(0, (batch[decrKey] as number) - 1)
+    if (incrKey) (batch[incrKey] as number) = (batch[incrKey] as number) + 1
+  }
+
+  function signBonus(recordId: string, signatureName: string): boolean {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'pending') return false
+    const prevStatus = record.status
+    record.status = 'signed'
+    record.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    record.signature = signatureName
+    updateBatchStats(record.batchId, prevStatus, 'signed')
+    return true
+  }
+
+  function submitObjection(recordId: string, reason: string, description: string, attachments: string[]): boolean {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'pending') return false
+    const prevStatus = record.status
+    record.status = 'objected'
+    record.objection = {
+      id: generateId(),
+      reason,
+      description,
+      attachments,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      objectorName: record.employeeName
+    }
+    updateBatchStats(record.batchId, prevStatus, 'objected')
+    return true
+  }
+
+  function startReview(recordId: string): boolean {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'objected') return false
+    record.status = 'reviewing'
+    return true
+  }
+
+  function completeReview(recordId: string, result: 'confirmed' | 'adjusted', comment: string, adjustedAmounts?: { grossAmount: number; taxAmount: number; netAmount: number }): boolean {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'reviewing') return false
+    record.status = result === 'confirmed' ? 'resolved_confirmed' : 'resolved_adjusted'
+    record.review = {
+      id: generateId(),
+      result,
+      comment,
+      reviewerName: '系统管理员',
+      reviewedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      adjustedGrossAmount: adjustedAmounts?.grossAmount,
+      adjustedTaxAmount: adjustedAmounts?.taxAmount,
+      adjustedNetAmount: adjustedAmounts?.netAmount
+    }
+    if (result === 'adjusted' && adjustedAmounts) {
+      record.grossAmount = adjustedAmounts.grossAmount
+      record.taxAmount = adjustedAmounts.taxAmount
+      record.netAmount = adjustedAmounts.netAmount
+    }
+    return true
+  }
+
+  function sendReminder(recordId: string): boolean {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'pending') return false
+    record.reminderCount++
+    record.lastReminderAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    return true
+  }
+
+  function getTimeoutWarnings(): TimeoutWarning[] {
+    const warnings: TimeoutWarning[] = []
+    const now = dayjs()
+    for (const record of bonusConfirmations.value) {
+      if (record.status !== 'pending') continue
+      const deadline = dayjs(record.deadlineAt)
+      const remainingHours = deadline.diff(now, 'hour')
+      if (remainingHours <= 0) continue
+      let warningLevel: 'info' | 'warning' | 'critical' = 'info'
+      if (remainingHours <= 24) {
+        warningLevel = 'critical'
+      } else if (remainingHours <= 72) {
+        warningLevel = 'warning'
+      }
+      warnings.push({
+        recordId: record.id,
+        employeeId: record.employeeId,
+        employeeName: record.employeeName,
+        departmentName: record.departmentName,
+        deadlineAt: record.deadlineAt,
+        remainingHours,
+        warningLevel,
+        status: record.status
+      })
+    }
+    return warnings.sort((a, b) => a.remainingHours - b.remainingHours)
+  }
+
+  function createDefaultLevelDistributions(): SandboxLevelDistribution[] {
+    return performanceLevels.value.map((level) => ({
+      levelId: level.id,
+      levelName: level.name,
+      ratio: 1 / performanceLevels.value.length,
+      coefficient: level.coefficient
+    }))
+  }
+
+  const sandboxColors = ['#1890ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2']
+
+  function createBaselineScenario(): BonusSandboxScenario {
+    const id = generateId()
+    const scenario: BonusSandboxScenario = {
+      id,
+      name: '基准方案',
+      description: '基于当前配置的基准方案',
+      color: sandboxColors[0],
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      bonusPoolConfig: JSON.parse(JSON.stringify(bonusPool.value)),
+      levelDistributions: createDefaultLevelDistributions(),
+      isBaseline: true
+    }
+    return scenario
+  }
+
+  const baselineScenario = createBaselineScenario()
+  const sandboxScenarios = ref<BonusSandboxScenario[]>([baselineScenario])
+  const activeSandboxScenarioIds = ref<string[]>([baselineScenario.id])
+
+  const activeSandboxScenarios = computed(() => {
+    return sandboxScenarios.value.filter((s) => activeSandboxScenarioIds.value.includes(s.id))
+  })
+
+  function createSandboxScenario(data: { name: string; description: string }): BonusSandboxScenario {
+    const usedColors = sandboxScenarios.value.map((s) => s.color)
+    const availableColor = sandboxColors.find((c) => !usedColors.includes(c)) || sandboxColors[sandboxScenarios.value.length % sandboxColors.length]
+    const scenario: BonusSandboxScenario = {
+      id: generateId(),
+      name: data.name,
+      description: data.description,
+      color: availableColor,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      bonusPoolConfig: JSON.parse(JSON.stringify(bonusPool.value)),
+      levelDistributions: createDefaultLevelDistributions(),
+      isBaseline: false
+    }
+    sandboxScenarios.value.push(scenario)
+    refreshSandboxMetrics(scenario.id)
+    return scenario
+  }
+
+  function duplicateSandboxScenario(scenarioId: string): BonusSandboxScenario | null {
+    const source = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!source) return null
+    const usedColors = sandboxScenarios.value.map((s) => s.color)
+    const availableColor = sandboxColors.find((c) => !usedColors.includes(c)) || sandboxColors[sandboxScenarios.value.length % sandboxColors.length]
+    const scenario: BonusSandboxScenario = {
+      id: generateId(),
+      name: `${source.name}-副本`,
+      description: source.description,
+      color: availableColor,
+      createdAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      bonusPoolConfig: JSON.parse(JSON.stringify(source.bonusPoolConfig)),
+      levelDistributions: JSON.parse(JSON.stringify(source.levelDistributions)),
+      isBaseline: false,
+      metrics: source.metrics ? JSON.parse(JSON.stringify(source.metrics)) : undefined
+    }
+    sandboxScenarios.value.push(scenario)
+    return scenario
+  }
+
+  function updateSandboxScenario(scenarioId: string, updates: Partial<BonusSandboxScenario>): boolean {
+    const idx = sandboxScenarios.value.findIndex((s) => s.id === scenarioId)
+    if (idx === -1) return false
+    sandboxScenarios.value[idx] = {
+      ...sandboxScenarios.value[idx],
+      ...updates,
+      updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss')
+    }
+    refreshSandboxMetrics(scenarioId)
+    return true
+  }
+
+  function deleteSandboxScenario(scenarioId: string): boolean {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!scenario || scenario.isBaseline) return false
+    sandboxScenarios.value = sandboxScenarios.value.filter((s) => s.id !== scenarioId)
+    activeSandboxScenarioIds.value = activeSandboxScenarioIds.value.filter((id) => id !== scenarioId)
+    return true
+  }
+
+  function setBaselineScenario(scenarioId: string): void {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!scenario) return
+    for (const s of sandboxScenarios.value) {
+      s.isBaseline = s.id === scenarioId
+    }
+  }
+
+  function toggleSandboxScenarioActive(scenarioId: string): void {
+    const idx = activeSandboxScenarioIds.value.indexOf(scenarioId)
+    if (idx !== -1) {
+      activeSandboxScenarioIds.value.splice(idx, 1)
+    } else {
+      activeSandboxScenarioIds.value.push(scenarioId)
+    }
+  }
+
+  function calculateSandboxMetrics(scenario: BonusSandboxScenario): SandboxKeyMetrics | null {
+    const poolConfig = scenario.bonusPoolConfig
+    const emps = allEmployees.value
+    if (emps.length === 0) return null
+
+    const grossBonuses: number[] = []
+    const deptBaseTotals: Record<string, number> = {}
+    const levelDistribution: Record<string, { count: number; totalBonus: number }> = {}
+    const deptDistribution: Record<string, { count: number; totalBonus: number; allocationRatio: number }> = {}
+    let totalTaxOneTime = 0
+    let totalTaxComprehensive = 0
+    let totalSavings = 0
+    let cappedCount = 0
+    let flooredCount = 0
+    let adjustmentImpact = 0
+
+    for (const level of performanceLevels.value) {
+      levelDistribution[level.id] = { count: 0, totalBonus: 0 }
+    }
+    for (const dept of departments.value) {
+      deptDistribution[dept.id] = {
+        count: 0,
+        totalBonus: 0,
+        allocationRatio: poolConfig.departmentRatios[dept.id] || 0
+      }
+    }
+
+    for (const dept of departments.value) {
+      let deptTotal = 0
+      for (const emp of dept.employees) {
+        const weightedSalary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+        const base = weightedSalary * poolConfig.baseRatio
+        const perfCoef = performanceLevels.value.find((l) => l.id === emp.performanceLevelId)?.coefficient || 1
+        const perfBonus = round2(base * perfCoef * poolConfig.performanceRatio)
+        const tenureCoef = Math.min(emp.yearsOfService * 0.05, 0.5)
+        const tenureBonus = round2(base * tenureCoef * poolConfig.tenureRatio)
+        const tagCoef = getTagCoefficient(emp.tagIds)
+        const tagBonus = round2(base * tagCoef)
+        const baseAmount = round2(base + perfBonus + tenureBonus + tagBonus)
+        deptTotal += baseAmount
+      }
+      deptBaseTotals[dept.id] = deptTotal
+    }
+
+    for (const dept of departments.value) {
+      const deptAlloc = round2(poolConfig.totalAmount * (poolConfig.departmentRatios[dept.id] || 0))
+      const deptBaseTotal = deptBaseTotals[dept.id] || 1
+      const scaleFactor = deptAlloc / deptBaseTotal
+
+      for (const emp of dept.employees) {
+        const weightedSalary = calculateWeightedBaseSalary(emp, bonusCalculationYear.value)
+        const base = weightedSalary * poolConfig.baseRatio
+        const perfCoef = performanceLevels.value.find((l) => l.id === emp.performanceLevelId)?.coefficient || 1
+        const perfBonus = round2(base * perfCoef * poolConfig.performanceRatio)
+        const tenureCoef = Math.min(emp.yearsOfService * 0.05, 0.5)
+        const tenureBonus = round2(base * tenureCoef * poolConfig.tenureRatio)
+        const tagCoef = getTagCoefficient(emp.tagIds)
+        const tagBonus = round2(base * tagCoef)
+        const baseAmount = round2(base + perfBonus + tenureBonus + tagBonus)
+        let gross = round2(baseAmount * scaleFactor)
+
+        if (poolConfig.capEnabled && gross > poolConfig.capAmount) {
+          adjustmentImpact += gross - poolConfig.capAmount
+          gross = poolConfig.capAmount
+          cappedCount++
+        } else if (poolConfig.floorEnabled && gross < poolConfig.floorAmount) {
+          adjustmentImpact -= poolConfig.floorAmount - gross
+          gross = poolConfig.floorAmount
+          flooredCount++
+        }
+
+        grossBonuses.push(gross)
+        totalTaxOneTime += calculateOneTimeTax(gross)
+        const ci = comprehensiveIncome.value[emp.id] || {
+          annualSalary: emp.baseSalary * 12,
+          specialDeduction: emp.baseSalary * 12 * 0.22,
+          specialAdditionalDeduction: 24000,
+          otherDeduction: 0
+        }
+        const compResult = calculateComprehensiveTax(
+          ci.annualSalary,
+          gross,
+          ci.specialDeduction,
+          ci.specialAdditionalDeduction,
+          ci.otherDeduction
+        )
+        totalTaxComprehensive += compResult.taxDifference
+        totalSavings += Math.abs(calculateOneTimeTax(gross) - compResult.taxDifference)
+
+        if (levelDistribution[emp.performanceLevelId]) {
+          levelDistribution[emp.performanceLevelId].count++
+          levelDistribution[emp.performanceLevelId].totalBonus += gross
+        }
+        if (deptDistribution[dept.id]) {
+          deptDistribution[dept.id].count++
+          deptDistribution[dept.id].totalBonus += gross
+        }
+      }
+    }
+
+    const sorted = [...grossBonuses].sort((a, b) => a - b)
+    const actualTotal = grossBonuses.reduce((s, v) => s + v, 0)
+    const medianBonus = sorted.length % 2 === 0
+      ? round2((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2)
+      : sorted[Math.floor(sorted.length / 2)]
+
+    const levelBonusDistribution: SandboxKeyMetrics['levelBonusDistribution'] = {}
+    for (const [lvlId, data] of Object.entries(levelDistribution)) {
+      levelBonusDistribution[lvlId] = {
+        count: data.count,
+        ratio: emps.length > 0 ? round2(data.count / emps.length) : 0,
+        averageBonus: data.count > 0 ? round2(data.totalBonus / data.count) : 0,
+        totalBonus: round2(data.totalBonus)
+      }
+    }
+
+    const departmentBonusDistribution: SandboxKeyMetrics['departmentBonusDistribution'] = {}
+    for (const [deptId, data] of Object.entries(deptDistribution)) {
+      departmentBonusDistribution[deptId] = {
+        count: data.count,
+        averageBonus: data.count > 0 ? round2(data.totalBonus / data.count) : 0,
+        totalBonus: round2(data.totalBonus),
+        allocationRatio: data.allocationRatio
+      }
+    }
+
+    return {
+      totalBonusPool: poolConfig.totalAmount,
+      actualTotalBonus: round2(actualTotal),
+      averageBonus: round2(actualTotal / emps.length),
+      medianBonus,
+      maxBonus: sorted.length > 0 ? sorted[sorted.length - 1] : 0,
+      minBonus: sorted.length > 0 ? sorted[0] : 0,
+      totalEmployees: emps.length,
+      totalTaxOneTime: round2(totalTaxOneTime),
+      totalTaxComprehensive: round2(totalTaxComprehensive),
+      averageTaxSaving: emps.length > 0 ? round2(totalSavings / emps.length) : 0,
+      levelBonusDistribution,
+      departmentBonusDistribution,
+      cappedCount,
+      flooredCount,
+      adjustmentImpact: round2(adjustmentImpact)
+    }
+  }
+
+  function refreshSandboxMetrics(scenarioId: string): void {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!scenario) return
+    scenario.metrics = calculateSandboxMetrics(scenario) || undefined
+    scenario.updatedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+  }
+
+  function refreshAllSandboxMetrics(): void {
+    for (const scenario of sandboxScenarios.value) {
+      refreshSandboxMetrics(scenario.id)
+    }
+  }
+
+  function applySandboxScenario(scenarioId: string): boolean {
+    const scenario = sandboxScenarios.value.find((s) => s.id === scenarioId)
+    if (!scenario) return false
+    bonusPool.value = JSON.parse(JSON.stringify(scenario.bonusPoolConfig))
+    if (scenario.levelDistributions && scenario.levelDistributions.length > 0) {
+      performanceDistributionRatios.value = scenario.levelDistributions.map((ld) => ({
+        levelId: ld.levelId,
+        levelName: ld.levelName,
+        maxRatio: ld.ratio
+      }))
+    }
+    return true
+  }
+
+  refreshAllSandboxMetrics()
+
+  function getExpiringTagWarnings(daysThreshold: number = 7): EmployeeTagExpiryWarning[] {
+    const warnings: EmployeeTagExpiryWarning[] = []
+    const now = dayjs()
+    const tagEmployeesMap: Record<string, Employee[]> = {}
+    for (const dept of departments.value) {
+      for (const emp of dept.employees) {
+        for (const tagId of emp.tagIds) {
+          if (!tagEmployeesMap[tagId]) tagEmployeesMap[tagId] = []
+          tagEmployeesMap[tagId].push(emp)
+        }
+      }
+    }
+    for (const tag of employeeTags.value) {
+      const expiryDay = dayjs(tag.expiryDate)
+      const daysUntilExpiry = expiryDay.diff(now, 'day')
+      if (daysUntilExpiry > daysThreshold) continue
+      const employees = tagEmployeesMap[tag.id] || []
+      const affectedEmployees: EmployeeTagExpiryWarning['affectedEmployees'] = []
+      let totalPotentialLoss = 0
+      for (const emp of employees) {
+        const dept = getDepartmentById(emp.departmentId)
+        const currentTagBonus = round2(emp.baseSalary * bonusPool.value.baseRatio * tag.coefficient)
+        const potentialLoss = currentTagBonus
+        totalPotentialLoss += potentialLoss
+        affectedEmployees.push({
+          id: emp.id,
+          name: emp.name,
+          departmentName: dept?.name || '',
+          currentTagBonus,
+          potentialLoss
+        })
+      }
+      warnings.push({
+        tag,
+        daysUntilExpiry,
+        affectedEmployees,
+        totalPotentialLoss: round2(totalPotentialLoss),
+        affectedCount: employees.length
+      })
+    }
+    return warnings.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry)
   }
 
   return {
@@ -991,6 +1892,13 @@ export const useBonusStore = defineStore('bonus', () => {
     calibrationHalf,
     calibrationScope,
     calibrationDeptId,
+    bonusPlanVersions,
+    versionApprovalRecords,
+    bonusConfirmations,
+    bonusConfirmationBatches,
+    sandboxScenarios,
+    activeSandboxScenarioIds,
+    activeSandboxScenarios,
     addPerformanceLevel,
     updatePerformanceLevel,
     removePerformanceLevel,
@@ -1013,6 +1921,8 @@ export const useBonusStore = defineStore('bonus', () => {
     addSalaryAdjustmentImpact,
     removeEmployeeImpacts,
     calculateEmployeeBaseAmount,
+    calculateAdjustedTenureBonus,
+    calculateDynamicAnnualSalary,
     updateDistributionRatio,
     initDistributionRatios,
     startCalibration,
@@ -1024,6 +1934,42 @@ export const useBonusStore = defineStore('bonus', () => {
     saveCalibration,
     getCalibrationDistributionStats,
     exportData,
-    importData
+    importData,
+    createVersion,
+    getCurrentVersion,
+    getVersionById,
+    getApprovalRecordsByVersionId,
+    compareWithCurrent,
+    compareVersions,
+    submitVersionForApproval,
+    approveVersion,
+    rejectVersion,
+    rollbackToVersion,
+    deleteVersion,
+    createConfirmationBatch,
+    publishConfirmationBatch,
+    deleteConfirmationBatch,
+    checkTimeouts,
+    getConfirmationsByBatch,
+    getConfirmationById,
+    getConfirmationStatusLabel,
+    getConfirmationStatusColor,
+    signBonus,
+    submitObjection,
+    startReview,
+    completeReview,
+    sendReminder,
+    getTimeoutWarnings,
+    createSandboxScenario,
+    duplicateSandboxScenario,
+    updateSandboxScenario,
+    deleteSandboxScenario,
+    setBaselineScenario,
+    toggleSandboxScenarioActive,
+    calculateSandboxMetrics,
+    refreshSandboxMetrics,
+    refreshAllSandboxMetrics,
+    applySandboxScenario,
+    getExpiringTagWarnings
   }
 })

@@ -1811,8 +1811,6 @@ ${topBonus.length > 0 ? `
     try {
       const approvedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
 
-      bonusStore.updateEmployee(request.employeeId, { baseSalary: request.proposedSalary })
-
       bonusStore.addSalaryAdjustmentImpact(request.employeeId, {
         name: '调薪影响',
         description: `${request.reasonName} - ${request.requestNo}`,
@@ -1822,6 +1820,8 @@ ${topBonus.length > 0 ? `
         requestNo: request.requestNo,
         reasonName: request.reasonName
       })
+
+      bonusStore.updateEmployee(request.employeeId, { baseSalary: request.proposedSalary })
 
       addSalaryHistoryFromRequest(request, approvedAt, approverName)
 

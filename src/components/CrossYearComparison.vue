@@ -491,6 +491,23 @@ watch(selectedEmployeeId, () => {
   }
 })
 
+watch(
+  () => [
+    store.approvedRequests.length,
+    store.salaryHistory.length,
+    store.requests.filter(r => r.status === 'approved').length,
+    bonusStore.salaryAdjustmentImpacts.length,
+    bonusStore.allEmployees.length,
+    bonusStore.departments.length
+  ],
+  () => {
+    if (selectedYears.value.length > 0) {
+      generateReport()
+    }
+  },
+  { deep: false }
+)
+
 onMounted(() => {
   const availableYears = store.getAvailableYears()
   if (availableYears.length >= 2) {
