@@ -115,6 +115,26 @@
             <template v-else-if="activeMenu === 'annual-review'">
               <AnnualCompensationReview />
             </template>
+
+            <template v-else-if="activeMenu === 'sandbox'">
+              <BonusSandboxSimulation />
+            </template>
+
+            <template v-else-if="activeMenu === 'confirmation-batches'">
+              <BonusConfirmationBatchList @viewBatch="handleViewBatch" />
+            </template>
+
+            <template v-else-if="activeMenu === 'confirmation-list' && selectedBatchId">
+              <BonusConfirmationList :batch-id="selectedBatchId" @back="activeMenu = 'confirmation-batches'" />
+            </template>
+
+            <template v-else-if="activeMenu === 'confirmation-list'">
+              <BonusConfirmationBatchList @viewBatch="handleViewBatch" />
+            </template>
+
+            <template v-else-if="activeMenu === 'confirmation-review'">
+              <BonusReviewPanel />
+            </template>
           </n-space>
         </n-layout-content>
 
@@ -162,7 +182,10 @@ import {
   PieChartOutlined,
   HistoryOutlined,
   ProfileOutlined,
-  BarChartOutlined
+  BarChartOutlined,
+  CheckSquareOutlined,
+  ExperimentOutlined,
+  AuditOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
@@ -181,6 +204,10 @@ import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
 import EmployeeCompensationArchive from '@/components/EmployeeCompensationArchive.vue'
 import CrossYearComparison from '@/components/CrossYearComparison.vue'
 import AnnualCompensationReview from '@/components/AnnualCompensationReview.vue'
+import BonusSandboxSimulation from '@/components/BonusSandboxSimulation.vue'
+import BonusConfirmationBatchList from '@/components/BonusConfirmationBatchList.vue'
+import BonusConfirmationList from '@/components/BonusConfirmationList.vue'
+import BonusReviewPanel from '@/components/BonusReviewPanel.vue'
 import dayjs from 'dayjs'
 import type { AppData, SalaryAdjustmentModuleData } from '@/types'
 
@@ -191,6 +218,7 @@ const message = useMessage()
 const collapsed = ref(false)
 const activeMenu = ref('overview')
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const selectedBatchId = ref<string | null>(null)
 
 const menuOptions: MenuOption[] = [
   {
@@ -274,6 +302,33 @@ const menuOptions: MenuOption[] = [
         icon: () => h(BarChartOutlined)
       }
     ]
+  },
+  {
+    label: '奖金沙盘推演',
+    key: 'sandbox',
+    icon: () => h(ExperimentOutlined)
+  },
+  {
+    label: '奖金确认管理',
+    key: 'confirmation-group',
+    icon: () => h(CheckSquareOutlined),
+    children: [
+      {
+        label: '确认批次管理',
+        key: 'confirmation-batches',
+        icon: () => h(FileTextOutlined)
+      },
+      {
+        label: '员工确认列表',
+        key: 'confirmation-list',
+        icon: () => h(TableOutlined)
+      },
+      {
+        label: '异议复核面板',
+        key: 'confirmation-review',
+        icon: () => h(AuditOutlined)
+      }
+    ]
   }
 ]
 
@@ -293,10 +348,19 @@ const currentTitle = computed(() => {
     'salary-history': '📈 历史调薪轨迹',
     'compensation-archive': '📁 员工薪酬档案',
     'annual-review': '📊 年度薪酬复盘',
-    'cross-year-comparison': '📊 跨年度趋势对比'
+    'cross-year-comparison': '📊 跨年度趋势对比',
+    sandbox: '🧪 奖金沙盘推演',
+    'confirmation-batches': '📋 确认批次管理',
+    'confirmation-list': '✅ 员工确认列表',
+    'confirmation-review': '🔍 异议复核面板'
   }
   return map[activeMenu.value] || ''
 })
+
+function handleViewBatch(batchId: string) {
+  selectedBatchId.value = batchId
+  activeMenu.value = 'confirmation-list'
+}
 
 function handleExport() {
   const salaryData = salaryStore.exportModuleData()

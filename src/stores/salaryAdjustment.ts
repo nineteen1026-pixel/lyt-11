@@ -1182,6 +1182,17 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     performanceHistory.value.forEach((p) => {
       years.add(p.year)
     })
+    requests.value.forEach((r) => {
+      if (r.status === 'approved') {
+        years.add(dayjs(r.effectiveDate).year())
+        if (r.approvedAt) {
+          years.add(dayjs(r.approvedAt).year())
+        }
+      }
+    })
+    if (years.size === 0) {
+      years.add(dayjs().year())
+    }
     return Array.from(years).sort((a, b) => b - a)
   }
 

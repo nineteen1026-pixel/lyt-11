@@ -204,6 +204,11 @@ export interface AppData {
   calibrationResults: CalibrationResult[]
   bonusPlanVersions?: BonusPlanVersion[]
   versionApprovalRecords?: VersionApprovalRecord[]
+  salaryAdjustmentImpacts?: BonusImpactSource[]
+  sandboxScenarios?: BonusSandboxScenario[]
+  activeSandboxScenarioIds?: string[]
+  bonusConfirmations?: BonusConfirmationRecord[]
+  bonusConfirmationBatches?: BonusConfirmationBatch[]
 }
 
 export type AdjustmentReasonCategory =

@@ -1027,7 +1027,12 @@ export const useBonusStore = defineStore('bonus', () => {
       performanceDistributionRatios: performanceDistributionRatios.value,
       calibrationResults: calibrationResults.value,
       bonusPlanVersions: bonusPlanVersions.value,
-      versionApprovalRecords: versionApprovalRecords.value
+      versionApprovalRecords: versionApprovalRecords.value,
+      salaryAdjustmentImpacts: salaryAdjustmentImpacts.value,
+      sandboxScenarios: sandboxScenarios.value,
+      activeSandboxScenarioIds: activeSandboxScenarioIds.value,
+      bonusConfirmations: bonusConfirmations.value,
+      bonusConfirmationBatches: bonusConfirmationBatches.value
     }
   }
 
@@ -1055,6 +1060,13 @@ export const useBonusStore = defineStore('bonus', () => {
       calibrationResults.value = data.calibrationResults || []
       bonusPlanVersions.value = data.bonusPlanVersions || []
       versionApprovalRecords.value = data.versionApprovalRecords || []
+      salaryAdjustmentImpacts.value = data.salaryAdjustmentImpacts || []
+      if (data.sandboxScenarios && data.sandboxScenarios.length > 0) {
+        sandboxScenarios.value = data.sandboxScenarios
+        activeSandboxScenarioIds.value = data.activeSandboxScenarioIds || sandboxScenarios.value.filter(s => s.isBaseline).map(s => s.id)
+      }
+      bonusConfirmations.value = data.bonusConfirmations || []
+      bonusConfirmationBatches.value = data.bonusConfirmationBatches || []
       currentCalibration.value = null
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
       return true

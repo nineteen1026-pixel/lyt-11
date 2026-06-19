@@ -355,6 +355,19 @@ const yearOptions = computed(() => {
   }))
 })
 
+const availableYears = computed(() => store.getAvailableYears())
+
+watch(availableYears, (newYears, oldYears) => {
+  const prev = oldYears || []
+  const newOnes = newYears.filter((y) => !prev.includes(y))
+  if (newOnes.length > 0 && selectedYears.value.length > 0) {
+    selectedYears.value = Array.from(new Set([...selectedYears.value, ...newOnes])).sort((a, b) => b - a)
+  }
+  if (newOnes.length > 0 && selectedYears.value.length === 0) {
+    selectedYears.value = newYears.slice(0, 3)
+  }
+}, { immediate: false })
+
 const departmentOptions = computed(() => {
   return bonusStore.departments.map((d) => ({
     label: d.name,
