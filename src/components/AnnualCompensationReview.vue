@@ -290,8 +290,117 @@
           :row-key="(row: any) => row.employeeId"
           striped
           :scroll-x="1400"
+          :expanded-row-keys="expandedRowKeys"
+          @update:expanded-row-keys="handleExpandedRowChange"
+          expand-trigger="row"
           :pagination="{ pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50, 100] }"
-        />
+        >
+          <template #expanded-row="{ row }">
+            <div class="expanded-row-content" v-if="row.competitiveness">
+              <n-grid :cols="2" :x-gap="20">
+                <n-gi :span="1.3">
+                  <n-space vertical :size="8" style="width: 100%">
+                    <n-text strong style="font-size: 13px">市场薪酬分位对标</n-text>
+                    <div class="exp-percentile-chart">
+                      <div class="exp-percentile-bar">
+                        <div
+                          v-for="(p, i) in percentileKeys"
+                          :key="p"
+                          class="exp-percentile-segment"
+                          :style="{
+                            width: getPercentileSegmentWidth(p) + '%',
+                            background: percentileColors[i]
+                          }"
+                        >
+                          <div class="exp-percentile-label">{{ p.toUpperCase() }}</div>
+                          <div class="exp-percentile-value">{{ formatMoney(row.competitiveness.benchmarkData.baseSalary[p]) }}</div>
+                        </div>
+                      </div>
+                      <div
+                        class="exp-current-marker"
+                        :style="{ left: getPercentilePosition(row.competitiveness.baseSalaryPercentile) + '%' }"
+                      >
+                        <div class="exp-marker-arrow"></div>
+                        <div class="exp-marker-label">
+                          当前 {{ formatMoney(row.competitiveness.baseSalary) }} · P{{ row.competitiveness.baseSalaryPercentile }}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="exp-percentile-chart">
+                      <div class="exp-percentile-bar">
+                        <div
+                          v-for="(p, i) in percentileKeys"
+                          :key="p"
+                          class="exp-percentile-segment"
+                          :style="{
+                            width: getPercentileSegmentWidth(p) + '%',
+                            background: percentileColors[i]
+                          }"
+                        >
+                          <div class="exp-percentile-label">{{ p.toUpperCase() }}</div>
+                          <div class="exp-percentile-value" style="font-size: 9px">
+                            {{ formatMoney(row.competitiveness.benchmarkData.totalCompensation[p]) }}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        class="exp-current-marker"
+                        :style="{ left: getPercentilePosition(row.competitiveness.totalCompensationPercentile) + '%' }"
+                      >
+                        <div class="exp-marker-arrow"></div>
+                        <div class="exp-marker-label" style="font-size: 10px">
+                          总包 {{ formatMoney(row.competitiveness.totalCompensation) }} · P{{ row.competitiveness.totalCompensationPercentile }}
+                        </div>
+                      </div>
+                    </div>
+                  </n-space>
+                </n-gi>
+                <n-gi :span="0.7">
+                  <n-space vertical :size="10" style="width: 100%">
+                    <n-text strong style="font-size: 13px">竞争力评估</n-text>
+                    <n-space :size="8" style="width: 100%">
+                      <n-tag :type="getCompetitivenessColorType(row.competitiveness.competitivenessLevel)" size="small" bordered>
+                        {{ getCompetitivenessLabel(row.competitiveness.competitivenessLevel) }}市场水平
+                      </n-tag>
+                      <n-tag
+                        :type="row.competitiveness.riskLevel === 'high' ? 'error' : row.competitiveness.riskLevel === 'medium' ? 'warning' : 'success'"
+                        size="small"
+                        bordered
+                      >
+                        流失风险{{ row.competitiveness.retentionRisk }}
+                      </n-tag>
+                    </n-space>
+                    <n-space vertical :size="4">
+                      <n-text depth="3" style="font-size: 12px">
+                        vs市场P50：
+                        <span :style="{ color: row.competitiveness.gapAnalysis.currentGapAmount > 0 ? '#f5222d' : '#52c41a'; fontWeight: 600 }">
+                          {{ row.competitiveness.gapAnalysis.currentGapAmount > 0 ? '低于' : '高于' }}
+                          {{ (Math.abs(row.competitiveness.gapAnalysis.currentGapPercent) * 100).toFixed(1) }}%
+                          （{{ formatMoney(Math.abs(row.competitiveness.gapAnalysis.currentGapAmount)) }}
+                        </span>
+                      </n-text>
+                    </n-space>
+                    <n-divider style="margin: 4px 0" />
+                    <n-text strong style="font-size: 13px">核心建议</n-text>
+                    <n-space vertical :size="6" style="width: 100%">
+                      <div
+                        v-for="(rec, idx) in row.competitiveness.recommendations.slice(0, 2)"
+                        :key="idx"
+                        class="exp-rec-item"
+                      >
+                        <div class="exp-rec-num">{{ idx + 1 }}</div>
+                        <div class="exp-rec-text">{{ rec }}</div>
+                      </div>
+                    </n-space>
+                  </n-space>
+                </n-gi>
+              </n-grid>
+            </div>
+            <div v-else class="expanded-row-empty">
+              <n-text depth="3" style="font-size: 12px">暂无市场对标数据</n-text>
+            </div>
+          </template>
+        </n-data-table>
       </n-card>
     </template>
 
@@ -322,6 +431,31 @@ import { loadChineseFont, getFontName } from '@/utils/chineseFont'
 const store = useSalaryAdjustmentStore()
 const bonusStore = useBonusStore()
 const message = useMessage()
+
+const expandedRowKeys = ref<string[]>([])
+
+function handleExpandedRowChange(keys: string[]) {
+  expandedRowKeys.value = keys
+}
+
+type PercentileKey = 'p10' | 'p25' | 'p50' | 'p75' | 'p90'
+const percentileKeys: PercentileKey[] = ['p10', 'p25', 'p50', 'p75', 'p90']
+const percentileColors = [
+  'linear-gradient(135deg, #ffccc7 0%, #ffa39e 100%)',
+  'linear-gradient(135deg, #ffd591 0%, #ffc069 100%)',
+  'linear-gradient(135deg, #91d5ff 0%, #69c0ff 100%)',
+  'linear-gradient(135deg, #95de64 0%, #73d13d 100%)',
+  'linear-gradient(135deg, #b37feb 0%, #9254de 100%)'
+]
+
+function getPercentileSegmentWidth(key: string): number {
+  const widths: Record<string, number> = { p10: 15, p25: 15, p50: 25, p75: 25, p90: 20 }
+  return widths[key] || 20
+}
+
+function getPercentilePosition(percentile: number): number {
+  return Math.max(2, Math.min(98, percentile))
+}
 
 const selectedYear = ref<number>(dayjs().year() - 1)
 const scope = ref<'company' | 'department' | 'employee'>('company')

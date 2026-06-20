@@ -162,9 +162,16 @@
           <n-gi>
             <div class="insight-item">
               <n-icon size="18" color="#fa8c16"><BulbOutlined /></n-icon>
-              <n-space vertical :size="2">
-                <n-text depth="3" style="font-size: 12px">建议</n-text>
-                <n-text strong>{{ review.competitiveness && review.competitiveness.recommendations.length > 0 ? '基于市场对标分析' : '基于内部数据分析' }}</n-text>
+              <n-space vertical :size="2" style="flex: 1; min-width: 0">
+                <n-text depth="3" style="font-size: 12px">
+                  建议
+                  <span style="color: #bfbfbf; margin-left: 4px">
+                  （{{ review.competitiveness && review.competitiveness.recommendations.length > 0 ? '市场对标' : '内部数据' }}）
+                </span>
+                </n-text>
+                <n-text strong style="font-size: 12px; line-height: 1.5; display: block; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical">
+                  {{ review.insights.recommendation }}
+                </n-text>
               </n-space>
             </div>
           </n-gi>
@@ -304,7 +311,7 @@
                 <n-icon size="24" color="#52c41a"><ArrowUpOutlined /></n-icon>
               </div>
               <n-space vertical :size="4" style="flex: 1">
-                <n-text depth="3" style="font-size: 12px">个人增长率</n-text>
+                <n-text depth="3" style="font-size: 12px">当年个人增长率</n-text>
                 <n-text
                   strong
                   style="font-size: 18px"
@@ -320,24 +327,24 @@
             <div class="assessment-card">
               <div
                 class="assessment-icon"
-                :style="{ background: review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '#f6ffed' : '#fff1f0' }"
+                :style="{ background: getAnnualVsMarketGrowth() >= 0 ? '#f6ffed' : '#fff1f0' }"
               >
                 <n-icon
                   size="24"
-                  :color="review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '#52c41a' : '#f5222d'"
+                  :color="getAnnualVsMarketGrowth() >= 0 ? '#52c41a' : '#f5222d'"
                 >
                   <ThunderboltOutlined />
                 </n-icon>
               </div>
               <n-space vertical :size="4" style="flex: 1">
-                <n-text depth="3" style="font-size: 12px">增长vs市场</n-text>
+                <n-text depth="3" style="font-size: 12px">当年增长vs市场</n-text>
                 <n-text
                   strong
                   style="font-size: 18px"
-                  :style="{ color: review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '#52c41a' : '#f5222d' }"
+                  :style="{ color: getAnnualVsMarketGrowth() >= 0 ? '#52c41a' : '#f5222d' }"
                 >
-                  {{ review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '+' : '' }}
-                  {{ (review.competitiveness.historicalAdjustments.vsMarketGrowth * 100).toFixed(1) }}%
+                  {{ getAnnualVsMarketGrowth() >= 0 ? '+' : '' }}
+                  {{ (getAnnualVsMarketGrowth() * 100).toFixed(1) }}%
                 </n-text>
               </n-space>
             </div>
@@ -375,7 +382,7 @@
 
         <n-divider style="margin: 16px 0" />
 
-        <n-grid :cols="4" :x-gap="16">
+        <n-grid :cols="5" :x-gap="12">
           <n-gi>
             <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
               <div class="stat-label">历史调薪次数</div>
@@ -385,7 +392,7 @@
           <n-gi>
             <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
               <div class="stat-label">历史累计调薪额</div>
-              <div class="stat-num">{{ formatMoney(review.competitiveness.historicalAdjustments.multiYearTotalAmount) }}</div>
+              <div class="stat-num" style="font-size: 14px">{{ formatMoney(review.competitiveness.historicalAdjustments.multiYearTotalAmount) }}</div>
             </div>
           </n-gi>
           <n-gi>
@@ -398,6 +405,25 @@
             <div class="stat-box" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
               <div class="stat-label">年复合增长率</div>
               <div class="stat-num">{{ (review.competitiveness.historicalAdjustments.cagr * 100).toFixed(1) }}%</div>
+            </div>
+          </n-gi>
+          <n-gi>
+            <div
+              class="stat-box"
+              :style="{
+                background: review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0
+                  ? 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)'
+                  : 'linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%)'
+              }"
+            >
+              <div class="stat-label">CAGR vs市场</div>
+              <div
+                class="stat-num"
+                :style="{ color: review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '#52c41a' : '#f5222d' }"
+              >
+                {{ review.competitiveness.historicalAdjustments.vsMarketGrowth >= 0 ? '+' : '' }}
+                {{ (review.competitiveness.historicalAdjustments.vsMarketGrowth * 100).toFixed(1) }}%
+              </div>
             </div>
           </n-gi>
         </n-grid>
@@ -535,6 +561,11 @@ function getBaseSalaryVsMarket(key: PercentileKey): number {
 
 function formatPercentileLabel(key: PercentileKey): string {
   return key.toUpperCase()
+}
+
+function getAnnualVsMarketGrowth(): number {
+  if (!props.review.competitiveness) return 0
+  return props.review.competitiveness.personalGrowthRate - props.review.competitiveness.marketGrowthRate
 }
 </script>
 
