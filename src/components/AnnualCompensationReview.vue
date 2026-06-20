@@ -373,7 +373,7 @@
                     <n-space vertical :size="4">
                       <n-text depth="3" style="font-size: 12px">
                         vs市场P50：
-                        <span :style="{ color: row.competitiveness.gapAnalysis.currentGapAmount > 0 ? '#f5222d' : '#52c41a'; fontWeight: 600 }">
+                        <span :style="{ color: row.competitiveness.gapAnalysis.currentGapAmount > 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }">
                           {{ row.competitiveness.gapAnalysis.currentGapAmount > 0 ? '低于' : '高于' }}
                           {{ (Math.abs(row.competitiveness.gapAnalysis.currentGapPercent) * 100).toFixed(1) }}%
                           （{{ formatMoney(Math.abs(row.competitiveness.gapAnalysis.currentGapAmount)) }}
@@ -611,6 +611,10 @@ function getCompetitivenessLabel(level: string): string {
 }
 
 const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
+  {
+    type: 'expand',
+    renderExpand: () => null
+  },
   { title: '姓名', key: 'employeeName', width: 80, fixed: 'left' },
   { title: '部门', key: 'departmentName', width: 100 },
   { title: '职位', key: 'position', width: 100 },
@@ -1293,5 +1297,114 @@ watch([scope, selectedDepartmentId, selectedEmployeeId], () => {})
 .rank-badge.rank-4,
 .rank-badge.rank-5 {
   background: #8c8c8c;
+}
+
+.expanded-row-content {
+  padding: 16px 20px;
+  background: #fafbfc;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.expanded-row-empty {
+  padding: 16px 20px;
+  text-align: center;
+  background: #fafbfc;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.exp-percentile-chart {
+  position: relative;
+  padding: 36px 0 24px;
+}
+
+.exp-percentile-bar {
+  display: flex;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.exp-percentile-segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 10px;
+  position: relative;
+}
+
+.exp-percentile-label {
+  font-weight: 700;
+  font-size: 10px;
+}
+
+.exp-percentile-value {
+  font-size: 8px;
+  opacity: 0.9;
+}
+
+.exp-current-marker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+.exp-marker-arrow {
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 10px solid #1f1f1f;
+  margin: 0 auto;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}
+
+.exp-marker-label {
+  background: #1f1f1f;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-align: center;
+  margin-top: 2px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  line-height: 1.4;
+}
+
+.exp-rec-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, #f0f5ff 0%, #e6f7ff 100%);
+  border-radius: 6px;
+  border-left: 3px solid #1890ff;
+}
+
+.exp-rec-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #1890ff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.exp-rec-text {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #262626;
 }
 </style>
