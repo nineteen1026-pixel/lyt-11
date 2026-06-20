@@ -1405,15 +1405,9 @@ export const useBonusStore = defineStore('bonus', () => {
     for (const record of bonusConfirmations.value) {
       if (record.status === 'pending' && now.isAfter(dayjs(record.deadlineAt))) {
         const prevStatus = record.status
-        record.status = 'signed'
-        record.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
-        record.signature = record.employeeName
+        record.status = 'timeout'
         record.timeoutNotifiedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
-        updateBatchStats(record.batchId, prevStatus, 'signed')
-        const voucher = createSignVoucher(record.id)
-        if (voucher) {
-          record.signVoucherId = voucher.id
-        }
+        updateBatchStats(record.batchId, prevStatus, 'timeout')
         checkBatchCompletion(record.batchId)
       }
     }
@@ -1424,8 +1418,9 @@ export const useBonusStore = defineStore('bonus', () => {
     if (!batch || batch.status !== 'published') return
     const batchConfirmations = bonusConfirmations.value.filter((c) => c.batchId === batchId)
     if (batchConfirmations.length === 0) return
-    const allProcessed = batchConfirmations.every((c) => c.status === 'signed')
-    if (allProcessed) {
+    const pendingCount = batchConfirmations.filter((c) => c.status === 'pending').length
+    const processingCount = batchConfirmations.filter((c) => c.status === 'objected' || c.status === 'reviewing').length
+    if (pendingCount === 0 && processingCount === 0) {
       batch.status = 'completed'
       batch.completedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
