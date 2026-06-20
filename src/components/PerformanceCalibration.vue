@@ -448,10 +448,10 @@ function handleApply() {
   showApplyConfirm.value = true
 }
 
-function confirmApply() {
-  store.applyCalibration()
+async function confirmApply() {
+  await store.applyCalibration()
   showApplyConfirm.value = false
-  message.success('校准结果已应用，绩效系数和奖金测算已刷新')
+  message.success('校准结果已应用，绩效历史数据、系数和奖金测算已刷新')
 }
 </script>
 

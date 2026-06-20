@@ -116,9 +116,9 @@
             >
               <div class="perf-period">{{ getHalfLabel(perf.half) }}</div>
               <n-tag
-                :color="getPerformanceLevelColor(perf.levelName)"
                 size="large"
                 bordered
+                :style="{ backgroundColor: getPerformanceLevelColor(perf.levelName) + '20', color: getPerformanceLevelColor(perf.levelName), borderColor: getPerformanceLevelColor(perf.levelName) }"
               >
                 {{ perf.levelName }}
               </n-tag>
@@ -192,9 +192,8 @@
               <n-space vertical :size="2">
                 <n-text depth="3" style="font-size: 12px">薪酬竞争力</n-text>
                 <n-tag
-                  :color="store.getCompetitivenessLevelColor(review.competitiveness.competitivenessLevel)"
                   size="small"
-                  style="width: fit-content"
+                  :style="{ backgroundColor: store.getCompetitivenessLevelColor(review.competitiveness.competitivenessLevel) + '20', color: store.getCompetitivenessLevelColor(review.competitiveness.competitivenessLevel), borderColor: store.getCompetitivenessLevelColor(review.competitiveness.competitivenessLevel), width: 'fit-content' }"
                 >
                   {{ review.insights.competitiveness }}
                 </n-tag>
@@ -489,6 +488,81 @@
           <div class="rec-content">{{ review.insights.recommendation }}</div>
         </div>
       </n-card>
+
+      <n-card v-if="review.promotionCandidate || review.nextYearSalaryRecommendation" size="small" title="🚀 晋升候选与下年度调薪建议">
+        <n-grid :cols="2" :x-gap="16" :y-gap="12">
+          <n-gi v-if="review.promotionCandidate">
+            <div class="promotion-card" :class="'level-' + review.promotionCandidate.level">
+              <div class="promo-label">晋升候选等级</div>
+              <n-space align="center" :size="8">
+                <n-tag type="warning" size="large" bordered v-if="review.promotionCandidate.level === 'strong'">
+                  {{ review.promotionCandidate.levelLabel }}
+                </n-tag>
+                <n-tag type="info" size="large" bordered v-else-if="review.promotionCandidate.level === 'recommended'">
+                  {{ review.promotionCandidate.levelLabel }}
+                </n-tag>
+                <n-tag type="success" size="large" bordered v-else>
+                  {{ review.promotionCandidate.levelLabel }}
+                </n-tag>
+                <n-text strong style="font-size: 16px">{{ review.promotionCandidate.score }} 分</n-text>
+              </n-space>
+              <n-divider style="margin: 10px 0" />
+              <n-space vertical :size="4">
+                <n-text depth="3" style="font-size: 12px">入选理由：</n-text>
+                <div
+                  v-for="(reason, idx) in review.promotionCandidate.reasons.slice(0, 3)"
+                  :key="idx"
+                  class="promo-reason"
+                >
+                  • {{ reason }}
+                </div>
+              </n-space>
+            </div>
+          </n-gi>
+
+          <n-gi v-if="review.nextYearSalaryRecommendation">
+            <div class="salary-rec-card" :class="'priority-' + review.nextYearSalaryRecommendation.priority">
+              <div class="rec-label">下年度调薪建议</div>
+              <n-space vertical :size="6">
+                <n-space align="center" :size="8">
+                  <n-tag
+                    :type="review.nextYearSalaryRecommendation.priority === 'urgent' ? 'error'
+                      : review.nextYearSalaryRecommendation.priority === 'high' ? 'warning'
+                      : review.nextYearSalaryRecommendation.priority === 'medium' ? 'info' : 'default'"
+                    size="large"
+                    bordered
+                  >
+                    {{ review.nextYearSalaryRecommendation.categoryLabel }}
+                  </n-tag>
+                  <n-tag
+                    :type="review.nextYearSalaryRecommendation.priority === 'urgent' ? 'error'
+                      : review.nextYearSalaryRecommendation.priority === 'high' ? 'warning'
+                      : review.nextYearSalaryRecommendation.priority === 'medium' ? 'info' : 'default'"
+                    size="small"
+                  >
+                    优先级：{{ review.nextYearSalaryRecommendation.priorityLabel }}
+                  </n-tag>
+                </n-space>
+                <n-text strong style="font-size: 14px">
+                  建议调薪幅度：+{{ (review.nextYearSalaryRecommendation.suggestedMinRatio * 100).toFixed(0) }}% ~ +{{ (review.nextYearSalaryRecommendation.suggestedMaxRatio * 100).toFixed(0) }}%
+                  （约 {{ formatMoney(review.nextYearSalaryRecommendation.suggestedAmount) }}）
+                </n-text>
+              </n-space>
+              <n-divider style="margin: 10px 0" />
+              <n-space vertical :size="4">
+                <n-text depth="3" style="font-size: 12px">建议理由：</n-text>
+                <div
+                  v-for="(reason, idx) in review.nextYearSalaryRecommendation.reasons.slice(0, 3)"
+                  :key="idx"
+                  class="promo-reason"
+                >
+                  • {{ reason }}
+                </div>
+              </n-space>
+            </div>
+          </n-gi>
+        </n-grid>
+      </n-card>
     </n-space>
   </n-card>
 </template>
@@ -496,6 +570,7 @@
 <script setup lang="ts">
 import type { EmployeeAnnualReview } from '@/types'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
+import { NTag } from 'naive-ui'
 import {
   BarChartOutlined,
   WalletOutlined,
@@ -897,5 +972,45 @@ function getAnnualVsMarketGrowth(): number {
   font-size: 13px;
   line-height: 1.6;
   color: #262626;
+}
+
+.promotion-card,
+.salary-rec-card {
+  padding: 16px;
+  border-radius: 10px;
+  background: #fafafa;
+}
+.promotion-card.level-strong {
+  background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);
+}
+.promotion-card.level-recommended {
+  background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
+}
+.promotion-card.level-potential {
+  background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
+}
+.salary-rec-card.priority-urgent {
+  background: linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%);
+}
+.salary-rec-card.priority-high {
+  background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);
+}
+.salary-rec-card.priority-medium {
+  background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
+}
+.salary-rec-card.priority-low {
+  background: linear-gradient(135deg, #f5f5f5 0%, #d9d9d9 100%);
+}
+.promo-label,
+.rec-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #595959;
+  margin-bottom: 10px;
+}
+.promo-reason {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #595959;
 }
 </style>

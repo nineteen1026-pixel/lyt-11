@@ -127,6 +127,56 @@
         </n-card>
       </template>
 
+      <template v-if="report.promotionAndAdjustmentSummary">
+        <n-card title="🚀 晋升候选与下年度调薪建议汇总">
+          <n-grid :cols="4" :x-gap="20">
+            <n-gi>
+              <div class="stat-card sc-strong" style="background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%)">
+                <div class="stat-label" style="color: #d46b08">强烈推荐晋升</div>
+                <div class="stat-value" style="color: #d46b08">
+                  {{ report.promotionAndAdjustmentSummary.strongCandidates }} 人
+                </div>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="stat-card sc-recommended" style="background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%)">
+                <div class="stat-label" style="color: #096dd9">推荐晋升</div>
+                <div class="stat-value" style="color: #096dd9">
+                  {{ report.promotionAndAdjustmentSummary.recommendedCandidates }} 人
+                </div>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="stat-card sc-potential" style="background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)">
+                <div class="stat-label" style="color: #389e0d">关注培养</div>
+                <div class="stat-value" style="color: #389e0d">
+                  {{ report.promotionAndAdjustmentSummary.potentialCandidates }} 人
+                </div>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="stat-card sc-budget" style="background: linear-gradient(135deg, #f9f0ff 0%, #efdbff 100%)">
+                <div class="stat-label" style="color: #531dab">建议调薪预算</div>
+                <div class="stat-value" style="color: #531dab">
+                  {{ formatMoney(report.promotionAndAdjustmentSummary.totalSuggestedAmount) }}
+                </div>
+              </div>
+            </n-gi>
+          </n-grid>
+
+          <n-divider style="margin: 16px 0" />
+
+          <n-grid :cols="5" :x-gap="12">
+            <n-gi v-for="(count, category) in report.promotionAndAdjustmentSummary.categoryBreakdown" :key="category">
+              <div class="cat-stat" :class="`cat-${category}`">
+                <div class="cat-label">{{ getSalaryRecCategoryLabel(category as any) }}</div>
+                <div class="cat-count">{{ count }} 人</div>
+              </div>
+            </n-gi>
+          </n-grid>
+        </n-card>
+      </template>
+
       <template v-if="scope === 'employee' && report.employees && report.employees.length > 0">
         <EmployeeReviewDetail :review="report.employees[0]" />
       </template>
@@ -289,7 +339,7 @@
           :data="report.employees || []"
           :row-key="(row: any) => row.employeeId"
           striped
-          :scroll-x="1400"
+          :scroll-x="1800"
           :expanded-row-keys="expandedRowKeys"
           @update:expanded-row-keys="handleExpandedRowChange"
           expand-trigger="row"
@@ -722,6 +772,41 @@ const employeeColumns: DataTableColumns<EmployeeAnnualReview> = [
       const first = row.competitiveness.recommendations[0]
       return h('span', { style: 'font-size: 12px; line-height: 1.5' }, first.length > 30 ? first.slice(0, 30) + '…' : first)
     }
+  },
+  {
+    title: '晋升候选',
+    key: 'promotionCandidate',
+    width: 110,
+    align: 'center',
+    render: (row: EmployeeAnnualReview) => {
+      const pc = row.promotionCandidate
+      if (!pc) return h('span', { style: 'color: #8c8c8c' }, '-')
+      const colorMap: Record<string, string> = { strong: 'warning', recommended: 'info', potential: 'success' }
+      return h(NTag, {
+        type: colorMap[pc.level] as any,
+        size: 'small',
+        bordered: true
+      }, { default: () => `${pc.levelLabel} (${pc.score}分)` })
+    }
+  },
+  {
+    title: '下年度调薪建议',
+    key: 'nextYearSalaryRecommendation',
+    width: 160,
+    align: 'center',
+    render: (row: EmployeeAnnualReview) => {
+      if (!row.nextYearSalaryRecommendation) return h('span', { style: 'color: #8c8c8c' }, '-')
+      const rec = row.nextYearSalaryRecommendation
+      const priorityColor: Record<string, string> = { urgent: 'error', high: 'warning', medium: 'info', low: 'default' }
+      return h(NTag, {
+        type: priorityColor[rec.priority] as any,
+        size: 'small',
+        bordered: true
+      }, {
+        default: () =>
+          `${rec.categoryLabel} +${(rec.suggestedMinRatio * 100).toFixed(0)}%~${(rec.suggestedMaxRatio * 100).toFixed(0)}%`
+      })
+    }
   }
 ]
 
@@ -765,6 +850,17 @@ function getPerformanceLevelColorType(level: string): 'success' | 'error' | 'war
     C: 'error'
   }
   return types[level] || 'default'
+}
+
+function getSalaryRecCategoryLabel(category: 'promotion' | 'performance_tilt' | 'market_catchup' | 'retention' | 'annual_regular'): string {
+  const labels: Record<string, string> = {
+    promotion: '晋升调薪',
+    performance_tilt: '绩效倾斜',
+    market_catchup: '市场补差',
+    retention: '保留性调薪',
+    annual_regular: '常规年度调薪'
+  }
+  return labels[category] || category
 }
 
 function handleYearChange() {}
@@ -1405,6 +1501,38 @@ watch([scope, selectedDepartmentId, selectedEmployeeId], () => {})
   flex: 1;
   font-size: 12px;
   line-height: 1.5;
+  color: #262626;
+}
+
+.cat-stat {
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+  background: #fafafa;
+}
+.cat-stat.cat-promotion {
+  background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);
+}
+.cat-stat.cat-performance_tilt {
+  background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
+}
+.cat-stat.cat-market_catchup {
+  background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
+}
+.cat-stat.cat-retention {
+  background: linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%);
+}
+.cat-stat.cat-annual_regular {
+  background: linear-gradient(135deg, #f5f5f5 0%, #d9d9d9 100%);
+}
+.cat-label {
+  font-size: 12px;
+  color: #595959;
+  margin-bottom: 4px;
+}
+.cat-count {
+  font-size: 18px;
+  font-weight: 700;
   color: #262626;
 }
 </style>

@@ -730,6 +730,22 @@ export interface EmployeeAnnualReview {
     marketPosition?: string
     competitiveness?: string
   }
+  promotionCandidate?: {
+    level: PromotionCandidateLevel
+    levelLabel: string
+    score: number
+    reasons: string[]
+  }
+  nextYearSalaryRecommendation?: {
+    category: SalaryRecommendationCategory
+    categoryLabel: string
+    suggestedMinRatio: number
+    suggestedMaxRatio: number
+    suggestedAmount: number
+    priority: 'urgent' | 'high' | 'medium' | 'low'
+    priorityLabel: string
+    reasons: string[]
+  }
 }
 
 export interface DepartmentAnnualReview {
@@ -765,6 +781,15 @@ export interface AnnualCompensationReviewReport {
   topSalaryGrowth?: EmployeeAnnualReview[]
   topBonusEarners?: EmployeeAnnualReview[]
   salaryAdjustmentByCategory?: Record<AdjustmentReasonCategory, number>
+  promotionAndAdjustmentSummary?: {
+    strongCandidates: number
+    recommendedCandidates: number
+    potentialCandidates: number
+    urgentRecommendations: number
+    highPriorityRecommendations: number
+    totalSuggestedAmount: number
+    categoryBreakdown: Record<SalaryRecommendationCategory, number>
+  }
 }
 
 export interface SandboxLevelDistribution {

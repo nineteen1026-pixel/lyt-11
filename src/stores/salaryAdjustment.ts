@@ -1847,6 +1847,21 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       scopeName: scope === 'company' ? '全公司' : undefined
     }
 
+    let employeeIds: string[] | undefined
+    if (scope === 'department' && scopeId) {
+      const dept = bonusStore.getDepartmentById(scopeId)
+      employeeIds = dept?.employees.map((e) => e.id) || []
+    } else if (scope === 'employee' && scopeId) {
+      employeeIds = [scopeId]
+    }
+    const promotionCandidates = analyzePromotionCandidates(year, employeeIds)
+    const salaryRecommendations = generateNextYearSalaryRecommendations(year, employeeIds)
+    const promotionMap = new Map(promotionCandidates.map((c) => [c.employeeId, c]))
+    const recommendationMap = new Map(salaryRecommendations.map((r) => [r.employeeId, r]))
+
+    const paSummary = buildPromotionAndAdjustmentReport(year, scope === 'company' ? 'company' : 'department', scopeId).summary
+    report.promotionAndAdjustmentSummary = paSummary
+
     if (scope === 'company') {
       const allEmployees = bonusStore.allEmployees
       const reviews = allEmployees
@@ -1902,6 +1917,30 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         overallSalaryGrowth: round2(overallGrowth),
         performanceDistribution: perfDist
       }
+      reviews.forEach((r) => {
+        const pc = promotionMap.get(r.employeeId)
+        if (pc) {
+          r.promotionCandidate = {
+            level: pc.level,
+            levelLabel: pc.levelLabel,
+            score: pc.score,
+            reasons: pc.reasons
+          }
+        }
+        const rec = recommendationMap.get(r.employeeId)
+        if (rec) {
+          r.nextYearSalaryRecommendation = {
+            category: rec.category,
+            categoryLabel: rec.categoryLabel,
+            suggestedMinRatio: rec.suggestedMinRatio,
+            suggestedMaxRatio: rec.suggestedMaxRatio,
+            suggestedAmount: rec.suggestedAmount,
+            priority: rec.priority,
+            priorityLabel: rec.priorityLabel,
+            reasons: rec.reasons
+          }
+        }
+      })
       report.departments = deptReviews
       report.employees = reviews
       report.topSalaryGrowth = sortedByGrowth.slice(0, 5)
@@ -1950,12 +1989,58 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         overallSalaryGrowth: round2(overallGrowth),
         performanceDistribution: perfDist
       }
+      reviews.forEach((r) => {
+        const pc = promotionMap.get(r.employeeId)
+        if (pc) {
+          r.promotionCandidate = {
+            level: pc.level,
+            levelLabel: pc.levelLabel,
+            score: pc.score,
+            reasons: pc.reasons
+          }
+        }
+        const rec = recommendationMap.get(r.employeeId)
+        if (rec) {
+          r.nextYearSalaryRecommendation = {
+            category: rec.category,
+            categoryLabel: rec.categoryLabel,
+            suggestedMinRatio: rec.suggestedMinRatio,
+            suggestedMaxRatio: rec.suggestedMaxRatio,
+            suggestedAmount: rec.suggestedAmount,
+            priority: rec.priority,
+            priorityLabel: rec.priorityLabel,
+            reasons: rec.reasons
+          }
+        }
+      })
       report.salaryAdjustmentByCategory = adjByCategory
       report.topSalaryGrowth = [...reviews].sort((a, b) => b.salaryGrowthRate - a.salaryGrowthRate).slice(0, 5)
       report.topBonusEarners = [...reviews].sort((a, b) => b.summary.totalBonusGross - a.summary.totalBonusGross).slice(0, 5)
     } else if (scope === 'employee' && scopeId) {
       const review = buildEmployeeAnnualReview(scopeId, year)
       if (review) {
+        const pc = promotionMap.get(review.employeeId)
+        if (pc) {
+          review.promotionCandidate = {
+            level: pc.level,
+            levelLabel: pc.levelLabel,
+            score: pc.score,
+            reasons: pc.reasons
+          }
+        }
+        const rec = recommendationMap.get(review.employeeId)
+        if (rec) {
+          review.nextYearSalaryRecommendation = {
+            category: rec.category,
+            categoryLabel: rec.categoryLabel,
+            suggestedMinRatio: rec.suggestedMinRatio,
+            suggestedMaxRatio: rec.suggestedMaxRatio,
+            suggestedAmount: rec.suggestedAmount,
+            priority: rec.priority,
+            priorityLabel: rec.priorityLabel,
+            reasons: rec.reasons
+          }
+        }
         report.scopeName = review.employeeName
         report.employees = [review]
 
@@ -3237,6 +3322,58 @@ ${topGrowers && topGrowers.length > 0 ? `
     }
   }
 
+  function addPerformanceRecordsFromCalibration(
+    calibrationYear: number,
+    calibrationHalf: 'first' | 'second' | 'annual',
+    employees: Array<{
+      employeeId: string
+      employeeName: string
+      departmentName: string
+      calibratedLevelId: string | null
+      calibratedLevelName: string | null
+      calibratedCoefficient: number | null
+      currentLevelId: string
+      currentLevelName: string
+      currentCoefficient: number
+    }>,
+    reviewerName: string = '绩效校准委员会'
+  ): number {
+    let addedCount = 0
+    const reviewedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+    for (const emp of employees) {
+      const levelId = emp.calibratedLevelId || emp.currentLevelId
+      const levelName = emp.calibratedLevelName || emp.currentLevelName
+      const coefficient = emp.calibratedCoefficient ?? emp.currentCoefficient
+
+      const exists = performanceHistory.value.some(
+        (h) =>
+          h.employeeId === emp.employeeId &&
+          h.year === calibrationYear &&
+          h.half === calibrationHalf
+      )
+      if (exists) continue
+
+      performanceHistory.value.push({
+        id: generateId(),
+        employeeId: emp.employeeId,
+        employeeName: emp.employeeName,
+        year: calibrationYear,
+        half: calibrationHalf,
+        levelId,
+        levelName,
+        coefficient,
+        reviewerName,
+        reviewedAt,
+        comment: emp.calibratedLevelId && emp.calibratedLevelId !== emp.currentLevelId
+          ? `绩效校准：由 ${emp.currentLevelName} 调整为 ${levelName}`
+          : '绩效校准确认'
+      })
+      addedCount++
+    }
+    return addedCount
+  }
+
   return {
     reasons,
     approvalWorkflow,
@@ -3326,6 +3463,7 @@ ${topGrowers && topGrowers.length > 0 ? `
     exportCrossYearReportHtml,
     analyzePromotionCandidates,
     generateNextYearSalaryRecommendations,
-    buildPromotionAndAdjustmentReport
+    buildPromotionAndAdjustmentReport,
+    addPerformanceRecordsFromCalibration
   }
 })

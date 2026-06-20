@@ -972,7 +972,7 @@ export const useBonusStore = defineStore('bonus', () => {
     currentCalibration.value.status = 'confirmed'
   }
 
-  function applyCalibration() {
+  async function applyCalibration() {
     if (!currentCalibration.value || currentCalibration.value.status === 'draft') return
 
     for (const emp of currentCalibration.value.employees) {
@@ -985,6 +985,25 @@ export const useBonusStore = defineStore('bonus', () => {
     currentCalibration.value.appliedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
 
     calibrationResults.value.push({ ...currentCalibration.value })
+
+    const { useSalaryAdjustmentStore } = await import('@/stores/salaryAdjustment')
+    const salaryStore = useSalaryAdjustmentStore()
+    const employeesForHistory = currentCalibration.value.employees.map((emp) => ({
+      employeeId: emp.employeeId,
+      employeeName: emp.employeeName,
+      departmentName: emp.departmentName,
+      calibratedLevelId: emp.calibratedLevelId,
+      calibratedLevelName: emp.calibratedLevelName,
+      calibratedCoefficient: emp.calibratedCoefficient,
+      currentLevelId: emp.currentLevelId,
+      currentLevelName: emp.currentLevelName,
+      currentCoefficient: emp.currentCoefficient
+    }))
+    salaryStore.addPerformanceRecordsFromCalibration(
+      currentCalibration.value.year,
+      currentCalibration.value.half,
+      employeesForHistory
+    )
   }
 
   function saveCalibration() {
