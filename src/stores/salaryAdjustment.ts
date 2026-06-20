@@ -35,7 +35,12 @@ import type {
   MarketBenchmarkData,
   SalaryCompetitivenessAssessment,
   CompetitivenessLevel,
-  BonusSignVoucher
+  BonusSignVoucher,
+  PromotionCandidateAnalysis,
+  PromotionCandidateLevel,
+  NextYearSalaryRecommendation,
+  SalaryRecommendationCategory,
+  PromotionAndAdjustmentReport
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -2834,6 +2839,404 @@ ${topGrowers && topGrowers.length > 0 ? `
 </html>`
   }
 
+  function analyzePromotionCandidates(
+    year: number,
+    employeeIds?: string[]
+  ): PromotionCandidateAnalysis[] {
+    const employees = employeeIds
+      ? bonusStore.allEmployees.filter((e) => employeeIds.includes(e.id))
+      : bonusStore.allEmployees
+
+    const levelOrder = ['S', 'A+', 'A', 'B+', 'B', 'C']
+    const highPerfLevels = new Set(['S', 'A+', 'A'])
+
+    return employees
+      .map((emp) => {
+        const dept = bonusStore.getDepartmentById(emp.departmentId)
+        const deptName = dept?.name || ''
+
+        const perfHistory = getEmployeePerformanceHistory(emp.id)
+        const perfTrend = getEmployeePerformanceTrend(emp.id, year)
+
+        const yearPerfs = perfHistory.filter((p) => p.year <= year)
+        if (yearPerfs.length === 0) return null
+
+        let consecutiveHighYears = 0
+        const sortedYears = [...new Set(yearPerfs.map((p) => p.year))].sort((a, b) => b - a)
+        for (const y of sortedYears) {
+          const yearRecords = yearPerfs.filter((p) => p.year === y)
+          const bestLevel = yearRecords.sort(
+            (a, b) => levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName)
+          )[0]
+          if (bestLevel && highPerfLevels.has(bestLevel.levelName)) {
+            consecutiveHighYears++
+          } else {
+            break
+          }
+        }
+
+        let trendDirection: 'rising' | 'stable' | 'declining' = 'stable'
+        if (perfTrend.length >= 2) {
+          const firstCoeff = perfTrend[0].coefficient
+          const lastCoeff = perfTrend[perfTrend.length - 1].coefficient
+          if (lastCoeff > firstCoeff * 1.05) trendDirection = 'rising'
+          else if (lastCoeff < firstCoeff * 0.95) trendDirection = 'declining'
+        } else if (sortedYears.length >= 2) {
+          const recentYearPerf = yearPerfs.filter((p) => p.year === sortedYears[0])
+          const prevYearPerf = yearPerfs.filter((p) => p.year === sortedYears[1])
+          if (recentYearPerf.length > 0 && prevYearPerf.length > 0) {
+            const recentBest = recentYearPerf.sort(
+              (a, b) => levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName)
+            )[0]
+            const prevBest = prevYearPerf.sort(
+              (a, b) => levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName)
+            )[0]
+            const recentIdx = levelOrder.indexOf(recentBest.levelName)
+            const prevIdx = levelOrder.indexOf(prevBest.levelName)
+            if (recentIdx < prevIdx) trendDirection = 'rising'
+            else if (recentIdx > prevIdx) trendDirection = 'declining'
+          }
+        }
+
+        const promotionHistory = salaryHistory.value
+          .filter((h) => h.employeeId === emp.id && h.reasonCategory === 'promotion')
+          .sort((a, b) => dayjs(b.effectiveDate).valueOf() - dayjs(a.effectiveDate).valueOf())
+        const lastPromotionYear =
+          promotionHistory.length > 0 ? dayjs(promotionHistory[0].effectiveDate).year() : null
+        const yearsSinceLastPromotion = lastPromotionYear ? year - lastPromotionYear : null
+
+        const salaryTrend = getEmployeeSalaryTrend(emp.id, year)
+        const startSalary = salaryTrend.length > 0 ? salaryTrend[0].baseSalary : emp.baseSalary
+        const endSalary = salaryTrend.length > 0 ? salaryTrend[salaryTrend.length - 1].baseSalary : emp.baseSalary
+        const salaryGrowthRate = startSalary > 0 ? (endSalary - startSalary) / startSalary : 0
+
+        const competitiveness = calculateSalaryCompetitiveness(emp.id, year)
+        const marketPercentile = competitiveness ? competitiveness.baseSalaryPercentile : null
+        const retentionRisk = competitiveness?.riskLevel || 'low'
+
+        let score = 0
+        const reasons: string[] = []
+
+        if (consecutiveHighYears >= 2) {
+          score += 40
+          reasons.push(`连续 ${consecutiveHighYears} 年高绩效（S/A+/A）`)
+        } else if (consecutiveHighYears === 1) {
+          score += 20
+          reasons.push('近1年绩效达到高绩效水平')
+        }
+
+        if (trendDirection === 'rising') {
+          score += 25
+          reasons.push('绩效走势持续上升')
+        } else if (trendDirection === 'stable') {
+          score += 10
+        }
+
+        if (yearsSinceLastPromotion !== null && yearsSinceLastPromotion >= 3) {
+          score += 20
+          reasons.push(`距上次晋升已 ${yearsSinceLastPromotion} 年`)
+        } else if (yearsSinceLastPromotion === null) {
+          score += 15
+          reasons.push('无晋升调薪记录，可能从未晋升')
+        }
+
+        if (salaryGrowthRate < 0.05) {
+          score += 10
+          reasons.push(`薪资增长率仅 ${(salaryGrowthRate * 100).toFixed(1)}%，低于常规水平`)
+        }
+
+        if (marketPercentile !== null && marketPercentile < 40) {
+          score += 5
+          reasons.push(`市场分位仅 P${marketPercentile}，存在竞争力不足风险`)
+        }
+
+        if (retentionRisk === 'high') {
+          score += 5
+          reasons.push('流失风险较高，需关注人才保留')
+        }
+
+        let level: PromotionCandidateLevel
+        let levelLabel: string
+        if (score >= 60 && consecutiveHighYears >= 2 && trendDirection === 'rising') {
+          level = 'strong'
+          levelLabel = '强烈推荐'
+        } else if (score >= 45 && consecutiveHighYears >= 1) {
+          level = 'recommended'
+          levelLabel = '推荐晋升'
+        } else if (score >= 25) {
+          level = 'potential'
+          levelLabel = '关注培养'
+        } else {
+          return null
+        }
+
+        return {
+          employeeId: emp.id,
+          employeeName: emp.name,
+          departmentName: deptName,
+          position: emp.position,
+          baseSalary: emp.baseSalary,
+          level,
+          levelLabel,
+          performanceTrend: perfTrend,
+          consecutiveHighPerfYears: consecutiveHighYears,
+          performanceTrendDirection: trendDirection,
+          lastPromotionYear,
+          yearsSinceLastPromotion,
+          salaryGrowthRate: round2(salaryGrowthRate),
+          marketPercentile,
+          retentionRisk,
+          score,
+          reasons
+        }
+      })
+      .filter((c): c is PromotionCandidateAnalysis => c !== null)
+      .sort((a, b) => b.score - a.score)
+  }
+
+  function generateNextYearSalaryRecommendations(
+    year: number,
+    employeeIds?: string[]
+  ): NextYearSalaryRecommendation[] {
+    const employees = employeeIds
+      ? bonusStore.allEmployees.filter((e) => employeeIds.includes(e.id))
+      : bonusStore.allEmployees
+
+    const candidates = analyzePromotionCandidates(year, employeeIds)
+    const candidateMap = new Map(candidates.map((c) => [c.employeeId, c]))
+
+    return employees
+      .map((emp) => {
+        const dept = bonusStore.getDepartmentById(emp.departmentId)
+        const deptName = dept?.name || ''
+
+        const candidate = candidateMap.get(emp.id)
+        const competitiveness = calculateSalaryCompetitiveness(emp.id, year)
+
+        const perfHistory = getEmployeePerformanceHistory(emp.id)
+        const perfTrend = getEmployeePerformanceTrend(emp.id, year)
+
+        let perfTrendDirection: 'rising' | 'stable' | 'declining' = 'stable'
+        if (perfTrend.length >= 2) {
+          const firstCoeff = perfTrend[0].coefficient
+          const lastCoeff = perfTrend[perfTrend.length - 1].coefficient
+          if (lastCoeff > firstCoeff * 1.05) perfTrendDirection = 'rising'
+          else if (lastCoeff < firstCoeff * 0.95) perfTrendDirection = 'declining'
+        }
+
+        const latestPerf = perfHistory.length > 0 ? perfHistory[0] : null
+        const latestPerfLevel = latestPerf?.levelName || 'B'
+
+        const salaryTrend = getEmployeeSalaryTrend(emp.id, year)
+        const startSalary = salaryTrend.length > 0 ? salaryTrend[0].baseSalary : emp.baseSalary
+        const endSalary = salaryTrend.length > 0 ? salaryTrend[salaryTrend.length - 1].baseSalary : emp.baseSalary
+        const salaryGrowthRate = startSalary > 0 ? (endSalary - startSalary) / startSalary : 0
+
+        const marketPercentile = competitiveness?.baseSalaryPercentile ?? null
+        const retentionRisk = competitiveness?.riskLevel || 'low'
+
+        let category: SalaryRecommendationCategory
+        let categoryLabel: string
+        let suggestedMinRatio: number
+        let suggestedMaxRatio: number
+        let priority: 'urgent' | 'high' | 'medium' | 'low'
+        let priorityLabel: string
+        const reasons: string[] = []
+
+        const isHighPerf = ['S', 'A+', 'A'].includes(latestPerfLevel)
+
+        if (candidate && candidate.level === 'strong') {
+          category = 'promotion'
+          categoryLabel = '晋升调薪'
+          suggestedMinRatio = 0.15
+          suggestedMaxRatio = 0.30
+          priority = 'urgent'
+          priorityLabel = '紧急'
+          reasons.push(`强烈推荐晋升候选，综合评分 ${candidate.score} 分`)
+          reasons.push(...candidate.reasons)
+        } else if (candidate && candidate.level === 'recommended') {
+          category = 'promotion'
+          categoryLabel = '晋升调薪'
+          suggestedMinRatio = 0.10
+          suggestedMaxRatio = 0.25
+          priority = 'high'
+          priorityLabel = '高优先'
+          reasons.push(`推荐晋升候选，综合评分 ${candidate.score} 分`)
+          reasons.push(...candidate.reasons)
+        } else if (isHighPerf && perfTrendDirection === 'rising') {
+          category = 'performance_tilt'
+          categoryLabel = '绩效倾斜调薪'
+          suggestedMinRatio = 0.08
+          suggestedMaxRatio = 0.20
+          priority = 'high'
+          priorityLabel = '高优先'
+          reasons.push(`绩效等级 ${latestPerfLevel}，走势上升，建议绩效调薪倾斜`)
+          if (salaryGrowthRate < 0.08) {
+            reasons.push(`当年薪资增长率仅 ${(salaryGrowthRate * 100).toFixed(1)}%，低于绩效表现`)
+          }
+        } else if (competitiveness && competitiveness.competitivenessLevel === 'far_below') {
+          category = 'market_catchup'
+          categoryLabel = '市场对标补差'
+          suggestedMinRatio = 0.10
+          suggestedMaxRatio = 0.25
+          priority = retentionRisk === 'high' ? 'urgent' : 'high'
+          priorityLabel = retentionRisk === 'high' ? '紧急' : '高优先'
+          reasons.push(`薪资远低于市场（P${competitiveness.baseSalaryPercentile}），建议补差至市场水平`)
+          if (isHighPerf) {
+            reasons.push('高绩效员工薪资低于市场，流失风险极大')
+          }
+        } else if (competitiveness && competitiveness.competitivenessLevel === 'below' && retentionRisk === 'high') {
+          category = 'retention'
+          categoryLabel = '保留性调薪'
+          suggestedMinRatio = 0.08
+          suggestedMaxRatio = 0.20
+          priority = 'urgent'
+          priorityLabel = '紧急'
+          reasons.push('流失风险高，建议紧急调薪保留')
+          if (isHighPerf) {
+            reasons.push('高绩效+薪资偏低，需优先保障保留')
+          }
+        } else if (competitiveness && competitiveness.competitivenessLevel === 'below') {
+          category = 'market_catchup'
+          categoryLabel = '市场对标补差'
+          suggestedMinRatio = 0.05
+          suggestedMaxRatio = 0.15
+          priority = 'medium'
+          priorityLabel = '中优先'
+          reasons.push(`薪资低于市场水平（P${competitiveness.baseSalaryPercentile}），建议逐步补差`)
+        } else if (isHighPerf && salaryGrowthRate < 0.05) {
+          category = 'performance_tilt'
+          categoryLabel = '绩效倾斜调薪'
+          suggestedMinRatio = 0.06
+          suggestedMaxRatio = 0.15
+          priority = 'medium'
+          priorityLabel = '中优先'
+          reasons.push(`绩效 ${latestPerfLevel} 但薪资增长不足，建议倾斜调薪`)
+        } else if (candidate && candidate.level === 'potential') {
+          category = 'performance_tilt'
+          categoryLabel = '绩效倾斜调薪'
+          suggestedMinRatio = 0.05
+          suggestedMaxRatio = 0.12
+          priority = 'medium'
+          priorityLabel = '中优先'
+          reasons.push('有晋升潜力，建议持续绩效倾斜激励')
+        } else if (retentionRisk === 'medium') {
+          category = 'retention'
+          categoryLabel = '保留性调薪'
+          suggestedMinRatio = 0.04
+          suggestedMaxRatio = 0.10
+          priority = 'medium'
+          priorityLabel = '中优先'
+          reasons.push('存在一定流失风险，建议关注保留')
+        } else {
+          category = 'annual_regular'
+          categoryLabel = '常规年度调薪'
+          suggestedMinRatio = 0.03
+          suggestedMaxRatio = 0.08
+          priority = 'low'
+          priorityLabel = '常规'
+          reasons.push('按常规年度调薪节奏执行')
+          if (perfTrendDirection === 'rising') {
+            suggestedMinRatio = 0.04
+            suggestedMaxRatio = 0.10
+            reasons.push('绩效上升趋势明显，建议适当上浮')
+          }
+        }
+
+        if (competitiveness && competitiveness.gapAnalysis.currentGapAmount > 0) {
+          const gapRatio = competitiveness.gapAnalysis.currentGapPercent
+          if (gapRatio > 0.15 && category !== 'promotion') {
+            suggestedMaxRatio = Math.max(suggestedMaxRatio, Math.min(gapRatio * 1.2, 0.30))
+          }
+        }
+
+        const suggestedRatio = round2((suggestedMinRatio + suggestedMaxRatio) / 2)
+        const suggestedAmount = round2(emp.baseSalary * suggestedRatio)
+
+        return {
+          employeeId: emp.id,
+          employeeName: emp.name,
+          departmentName: deptName,
+          position: emp.position,
+          currentSalary: emp.baseSalary,
+          category,
+          categoryLabel,
+          suggestedMinRatio: round2(suggestedMinRatio),
+          suggestedMaxRatio: round2(suggestedMaxRatio),
+          suggestedAmount,
+          priority,
+          priorityLabel,
+          promotionCandidateLevel: candidate?.level || null,
+          performanceTrendDirection: perfTrendDirection,
+          marketPercentile,
+          retentionRisk,
+          reasons
+        }
+      })
+      .sort((a, b) => {
+        const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 }
+        return priorityOrder[a.priority] - priorityOrder[b.priority]
+      })
+  }
+
+  function buildPromotionAndAdjustmentReport(
+    year: number,
+    scope: 'company' | 'department' = 'company',
+    scopeId?: string
+  ): PromotionAndAdjustmentReport {
+    let employeeIds: string[] | undefined
+    let scopeName = '全公司'
+
+    if (scope === 'department' && scopeId) {
+      const dept = bonusStore.getDepartmentById(scopeId)
+      scopeName = dept?.name || '未知部门'
+      employeeIds = dept?.employees.map((e) => e.id) || []
+    }
+
+    const candidates = analyzePromotionCandidates(year, employeeIds)
+    const recommendations = generateNextYearSalaryRecommendations(year, employeeIds)
+
+    const strongCandidates = candidates.filter((c) => c.level === 'strong').length
+    const recommendedCandidates = candidates.filter((c) => c.level === 'recommended').length
+    const potentialCandidates = candidates.filter((c) => c.level === 'potential').length
+
+    const urgentRecommendations = recommendations.filter((r) => r.priority === 'urgent').length
+    const highPriorityRecommendations = recommendations.filter((r) => r.priority === 'high').length
+    const totalSuggestedAmount = round2(recommendations.reduce((sum, r) => sum + r.suggestedAmount, 0))
+
+    const categoryBreakdown: Record<SalaryRecommendationCategory, number> = {
+      promotion: 0,
+      performance_tilt: 0,
+      market_catchup: 0,
+      retention: 0,
+      annual_regular: 0
+    }
+    recommendations.forEach((r) => {
+      categoryBreakdown[r.category]++
+    })
+
+    return {
+      year,
+      nextYear: year + 1,
+      generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      scope,
+      scopeId,
+      scopeName,
+      totalEmployees: employeeIds ? employeeIds.length : bonusStore.allEmployees.length,
+      promotionCandidates: candidates,
+      salaryRecommendations: recommendations,
+      summary: {
+        strongCandidates,
+        recommendedCandidates,
+        potentialCandidates,
+        urgentRecommendations,
+        highPriorityRecommendations,
+        totalSuggestedAmount,
+        categoryBreakdown
+      }
+    }
+  }
+
   return {
     reasons,
     approvalWorkflow,
@@ -2920,6 +3323,9 @@ ${topGrowers && topGrowers.length > 0 ? `
     getYearlyBonusData,
     getYearlyPerformanceData,
     buildCrossYearComparisonReport,
-    exportCrossYearReportHtml
+    exportCrossYearReportHtml,
+    analyzePromotionCandidates,
+    generateNextYearSalaryRecommendations,
+    buildPromotionAndAdjustmentReport
   }
 })

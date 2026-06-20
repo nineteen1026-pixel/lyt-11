@@ -906,3 +906,73 @@ export interface CrossYearComparisonReport {
   }[]
 }
 
+export type PromotionCandidateLevel = 'strong' | 'recommended' | 'potential'
+
+export type SalaryRecommendationCategory =
+  | 'promotion'
+  | 'performance_tilt'
+  | 'market_catchup'
+  | 'retention'
+  | 'annual_regular'
+
+export interface PromotionCandidateAnalysis {
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  baseSalary: number
+  level: PromotionCandidateLevel
+  levelLabel: string
+  performanceTrend: PerformanceTrendPoint[]
+  consecutiveHighPerfYears: number
+  performanceTrendDirection: 'rising' | 'stable' | 'declining'
+  lastPromotionYear: number | null
+  yearsSinceLastPromotion: number | null
+  salaryGrowthRate: number
+  marketPercentile: number | null
+  retentionRisk: 'high' | 'medium' | 'low'
+  score: number
+  reasons: string[]
+}
+
+export interface NextYearSalaryRecommendation {
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  currentSalary: number
+  category: SalaryRecommendationCategory
+  categoryLabel: string
+  suggestedMinRatio: number
+  suggestedMaxRatio: number
+  suggestedAmount: number
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  priorityLabel: string
+  promotionCandidateLevel: PromotionCandidateLevel | null
+  performanceTrendDirection: 'rising' | 'stable' | 'declining'
+  marketPercentile: number | null
+  retentionRisk: 'high' | 'medium' | 'low'
+  reasons: string[]
+}
+
+export interface PromotionAndAdjustmentReport {
+  year: number
+  nextYear: number
+  generatedAt: string
+  scope: 'company' | 'department'
+  scopeId?: string
+  scopeName?: string
+  totalEmployees: number
+  promotionCandidates: PromotionCandidateAnalysis[]
+  salaryRecommendations: NextYearSalaryRecommendation[]
+  summary: {
+    strongCandidates: number
+    recommendedCandidates: number
+    potentialCandidates: number
+    urgentRecommendations: number
+    highPriorityRecommendations: number
+    totalSuggestedAmount: number
+    categoryBreakdown: Record<SalaryRecommendationCategory, number>
+  }
+}
+

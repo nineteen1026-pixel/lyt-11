@@ -80,6 +80,7 @@ declare module 'vue' {
     PerformanceCalibration: typeof import('./src/components/PerformanceCalibration.vue')['default']
     PerformanceCoefficientTable: typeof import('./src/components/PerformanceCoefficientTable.vue')['default']
     PersonalCalculation: typeof import('./src/components/PersonalCalculation.vue')['default']
+    PromotionAndAdjustmentRecommendation: typeof import('./src/components/PromotionAndAdjustmentRecommendation.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SalaryAdjustmentDetail: typeof import('./src/components/SalaryAdjustmentDetail.vue')['default']

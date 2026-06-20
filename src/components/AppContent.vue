@@ -116,6 +116,10 @@
               <AnnualCompensationReview />
             </template>
 
+            <template v-else-if="activeMenu === 'promotion-adjustment'">
+              <PromotionAndAdjustmentRecommendation />
+            </template>
+
             <template v-else-if="activeMenu === 'sandbox'">
               <BonusSandboxSimulation />
             </template>
@@ -185,7 +189,8 @@ import {
   BarChartOutlined,
   CheckSquareOutlined,
   ExperimentOutlined,
-  AuditOutlined
+  AuditOutlined,
+  RocketOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import { useSalaryAdjustmentStore } from '@/stores/salaryAdjustment'
@@ -204,6 +209,7 @@ import SalaryHistoryTrace from '@/components/SalaryHistoryTrace.vue'
 import EmployeeCompensationArchive from '@/components/EmployeeCompensationArchive.vue'
 import CrossYearComparison from '@/components/CrossYearComparison.vue'
 import AnnualCompensationReview from '@/components/AnnualCompensationReview.vue'
+import PromotionAndAdjustmentRecommendation from '@/components/PromotionAndAdjustmentRecommendation.vue'
 import BonusSandboxSimulation from '@/components/BonusSandboxSimulation.vue'
 import BonusConfirmationBatchList from '@/components/BonusConfirmationBatchList.vue'
 import BonusConfirmationList from '@/components/BonusConfirmationList.vue'
@@ -300,6 +306,11 @@ const menuOptions: MenuOption[] = [
         label: '跨年度趋势对比',
         key: 'cross-year-comparison',
         icon: () => h(BarChartOutlined)
+      },
+      {
+        label: '晋升候选与调薪建议',
+        key: 'promotion-adjustment',
+        icon: () => h(RocketOutlined)
       }
     ]
   },
@@ -349,6 +360,7 @@ const currentTitle = computed(() => {
     'compensation-archive': '📁 员工薪酬档案',
     'annual-review': '📊 年度薪酬复盘',
     'cross-year-comparison': '📊 跨年度趋势对比',
+    'promotion-adjustment': '🚀 晋升候选与调薪建议',
     sandbox: '🧪 奖金沙盘推演',
     'confirmation-batches': '📋 确认批次管理',
     'confirmation-list': '✅ 员工确认列表',
