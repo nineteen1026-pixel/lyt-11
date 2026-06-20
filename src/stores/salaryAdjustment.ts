@@ -1839,6 +1839,8 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
   }
 
   function buildAnnualReviewReport(year: number, scope: 'company' | 'department' | 'employee' = 'company', scopeId?: string): AnnualCompensationReviewReport {
+    syncAppliedCalibrationsToPerformanceHistory()
+
     const report: AnnualCompensationReviewReport = {
       year,
       generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
@@ -1859,8 +1861,31 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     const promotionMap = new Map(promotionCandidates.map((c) => [c.employeeId, c]))
     const recommendationMap = new Map(salaryRecommendations.map((r) => [r.employeeId, r]))
 
-    const paSummary = buildPromotionAndAdjustmentReport(year, scope === 'company' ? 'company' : 'department', scopeId).summary
-    report.promotionAndAdjustmentSummary = paSummary
+    const strongCandidates = promotionCandidates.filter((c) => c.level === 'strong').length
+    const recommendedCandidates = promotionCandidates.filter((c) => c.level === 'recommended').length
+    const potentialCandidates = promotionCandidates.filter((c) => c.level === 'potential').length
+    const urgentRecommendations = salaryRecommendations.filter((r) => r.priority === 'urgent').length
+    const highPriorityRecommendations = salaryRecommendations.filter((r) => r.priority === 'high').length
+    const totalSuggestedAmount = round2(salaryRecommendations.reduce((sum, r) => sum + r.suggestedAmount, 0))
+    const categoryBreakdown: Record<SalaryRecommendationCategory, number> = {
+      promotion: 0,
+      performance_tilt: 0,
+      market_catchup: 0,
+      retention: 0,
+      annual_regular: 0
+    }
+    salaryRecommendations.forEach((r) => {
+      categoryBreakdown[r.category]++
+    })
+    report.promotionAndAdjustmentSummary = {
+      strongCandidates,
+      recommendedCandidates,
+      potentialCandidates,
+      urgentRecommendations,
+      highPriorityRecommendations,
+      totalSuggestedAmount,
+      categoryBreakdown
+    }
 
     if (scope === 'company') {
       const allEmployees = bonusStore.allEmployees
@@ -2148,35 +2173,83 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       return `<tr><td style="color:${getPerformanceLevelColor(level)};font-weight:600">${level}</td><td style="text-align:center">${count}</td><td style="text-align:right">${pct}%</td></tr>`
     }).join('') : ''
 
+    const paSummary = report.promotionAndAdjustmentSummary
+    const paCategoryLabels: Record<string, string> = {
+      promotion: '晋升调薪',
+      performance_tilt: '绩效倾斜',
+      market_catchup: '市场补差',
+      retention: '保留性调薪',
+      annual_regular: '常规年度调薪'
+    }
+    const paCategoryRows = paSummary ? Object.entries(paSummary.categoryBreakdown).map(([cat, count]) => {
+      const label = paCategoryLabels[cat] || cat
+      return `<tr><td>${label}</td><td style="text-align:center">${count} 人</td></tr>`
+    }).join('') : ''
+
+    const paEmployeeRows = employees.slice(0, 20).map((r) => {
+      const pc = r.promotionCandidate
+      const rec = r.nextYearSalaryRecommendation
+      const pcLabel = pc ? `${pc.levelLabel} (${pc.score}分)` : '-'
+      const recLabel = rec ? `${rec.categoryLabel} +${(rec.suggestedMinRatio * 100).toFixed(0)}%~${(rec.suggestedMaxRatio * 100).toFixed(0)}%` : '-'
+      const pcColor = pc?.level === 'strong' ? '#d46b08' : pc?.level === 'recommended' ? '#096dd9' : pc?.level === 'potential' ? '#389e0d' : '#8c8c8c'
+      const recColor = rec?.priority === 'urgent' ? '#cf1322' : rec?.priority === 'high' ? '#d46b08' : rec?.priority === 'medium' ? '#096dd9' : '#8c8c8c'
+      return `
+      <tr>
+        <td>${r.employeeName}</td>
+        <td>${r.departmentName}</td>
+        <td>${r.position}</td>
+        <td style="text-align:right">${formatMoney(r.endSalary)}</td>
+        <td style="text-align:right;color:${r.salaryGrowthRate >= 0 ? '#52c41a' : '#f5222d'}">${r.salaryGrowthRate >= 0 ? '+' : ''}${(r.salaryGrowthRate * 100).toFixed(2)}%</td>
+        <td style="text-align:right">${formatMoney(r.summary.totalBonusGross)}</td>
+        <td style="text-align:right">${formatMoney(r.summary.totalCompensationGross)}</td>
+        <td style="text-align:center;color:${getPerformanceLevelColor(r.summary.highestPerformanceLevel)};font-weight:600">${r.summary.highestPerformanceLevel}</td>
+        <td style="text-align:center;color:${pcColor};font-weight:600">${pcLabel}</td>
+        <td style="text-align:center;color:${recColor};font-weight:600">${recLabel}</td>
+      </tr>`
+    }).join('')
+
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <title>${year}年度薪酬包复盘报告_${scopeTitle}_${dayjs().format('YYYYMMDD')}</title>
 <style>
-  @page { size: A4; margin: 15mm; }
+  @page { size: A4 landscape; margin: 12mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.6; font-size: 13px; }
-  .header { text-align: center; padding: 24px 0 16px; border-bottom: 3px solid #2080f0; margin-bottom: 20px; }
-  .header h1 { font-size: 24px; color: #2080f0; margin-bottom: 4px; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.6; font-size: 12px; }
+  .header { text-align: center; padding: 16px 0 12px; border-bottom: 3px solid #2080f0; margin-bottom: 16px; }
+  .header h1 { font-size: 22px; color: #2080f0; margin-bottom: 4px; }
   .header p { color: #8c8c8c; font-size: 12px; }
-  .info-bar { display: flex; justify-content: space-between; background: #f6f8fa; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; }
-  .info-item .label { color: #8c8c8c; font-size: 12px; margin-bottom: 2px; }
-  .info-item .value { font-size: 16px; font-weight: 700; color: #262626; }
-  h2 { font-size: 16px; color: #262626; margin: 24px 0 12px; padding-left: 8px; border-left: 3px solid #2080f0; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }
-  th, td { border: 1px solid #e8e8e8; padding: 8px 12px; text-align: left; }
+  .info-bar { display: flex; justify-content: space-between; background: #f6f8fa; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; }
+  .info-item .label { color: #8c8c8c; font-size: 11px; margin-bottom: 2px; }
+  .info-item .value { font-size: 15px; font-weight: 700; color: #262626; }
+  h2 { font-size: 15px; color: #262626; margin: 20px 0 10px; padding-left: 8px; border-left: 3px solid #2080f0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+  th, td { border: 1px solid #e8e8e8; padding: 6px 10px; text-align: left; }
   th { background: #fafafa; font-weight: 600; color: #595959; white-space: nowrap; }
   tr:nth-child(even) td { background: #fafafa; }
-  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-  .summary-card { text-align: center; padding: 16px; border-radius: 8px; background: #f6f8fa; }
-  .summary-card .label { font-size: 12px; color: #8c8c8c; margin-bottom: 6px; }
-  .summary-card .value { font-size: 20px; font-weight: 700; color: #262626; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .summary-card { text-align: center; padding: 12px; border-radius: 8px; background: #f6f8fa; }
+  .summary-card .label { font-size: 11px; color: #8c8c8c; margin-bottom: 4px; }
+  .summary-card .value { font-size: 18px; font-weight: 700; color: #262626; }
   .sc-salary { background: #e6f7ff; }
   .sc-bonus { background: #f6ffed; }
   .sc-total { background: #fff7e6; }
   .sc-growth { background: #f9f0ff; }
-  .footer { text-align: center; color: #bfbfbf; font-size: 11px; margin-top: 32px; padding-top: 12px; border-top: 1px solid #e8e8e8; }
+  .sc-strong { background: #fff7e6; }
+  .sc-recommended { background: #e6f7ff; }
+  .sc-potential { background: #f6ffed; }
+  .sc-budget { background: #f9f0ff; }
+  .pa-cat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+  .pa-cat-item { text-align: center; padding: 8px; border-radius: 6px; background: #fafafa; font-size: 11px; }
+  .pa-cat-item.cat-promotion { background: #fff7e6; }
+  .pa-cat-item.cat-performance_tilt { background: #f6ffed; }
+  .pa-cat-item.cat-market_catchup { background: #e6f7ff; }
+  .pa-cat-item.cat-retention { background: #fff1f0; }
+  .pa-cat-item.cat-annual_regular { background: #f5f5f5; }
+  .pa-cat-item .cat-label { color: #595959; margin-bottom: 4px; }
+  .pa-cat-item .cat-count { font-weight: 700; font-size: 14px; color: #262626; }
+  .footer { text-align: center; color: #bfbfbf; font-size: 10px; margin-top: 24px; padding-top: 10px; border-top: 1px solid #e8e8e8; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>
@@ -2292,7 +2365,51 @@ ${topBonus.length > 0 ? `
 </table>
 ` : ''}
 
-<h2>六、员工薪酬明细（前20名）</h2>
+${paSummary ? `
+<h2>六、晋升候选与下年度调薪建议</h2>
+<div class="summary-grid">
+  <div class="summary-card sc-strong">
+    <div class="label">强烈推荐晋升</div>
+    <div class="value" style="color:#d46b08">${paSummary.strongCandidates} 人</div>
+  </div>
+  <div class="summary-card sc-recommended">
+    <div class="label">推荐晋升</div>
+    <div class="value" style="color:#096dd9">${paSummary.recommendedCandidates} 人</div>
+  </div>
+  <div class="summary-card sc-potential">
+    <div class="label">关注培养</div>
+    <div class="value" style="color:#389e0d">${paSummary.potentialCandidates} 人</div>
+  </div>
+  <div class="summary-card sc-budget">
+    <div class="label">建议调薪预算</div>
+    <div class="value" style="color:#531dab">${formatMoney(paSummary.totalSuggestedAmount)}</div>
+  </div>
+</div>
+<div class="pa-cat-grid">
+  <div class="pa-cat-item cat-promotion">
+    <div class="cat-label">晋升调薪</div>
+    <div class="cat-count">${paSummary.categoryBreakdown.promotion} 人</div>
+  </div>
+  <div class="pa-cat-item cat-performance_tilt">
+    <div class="cat-label">绩效倾斜</div>
+    <div class="cat-count">${paSummary.categoryBreakdown.performance_tilt} 人</div>
+  </div>
+  <div class="pa-cat-item cat-market_catchup">
+    <div class="cat-label">市场补差</div>
+    <div class="cat-count">${paSummary.categoryBreakdown.market_catchup} 人</div>
+  </div>
+  <div class="pa-cat-item cat-retention">
+    <div class="cat-label">保留性调薪</div>
+    <div class="cat-count">${paSummary.categoryBreakdown.retention} 人</div>
+  </div>
+  <div class="pa-cat-item cat-annual_regular">
+    <div class="cat-label">常规年度调薪</div>
+    <div class="cat-count">${paSummary.categoryBreakdown.annual_regular} 人</div>
+  </div>
+</div>
+` : ''}
+
+<h2>七、员工薪酬明细（前20名）</h2>
 <table>
   <thead>
     <tr>
@@ -2304,9 +2421,11 @@ ${topBonus.length > 0 ? `
       <th style="text-align:right">年度奖金</th>
       <th style="text-align:right">年度总包</th>
       <th style="text-align:center">最高绩效</th>
+      <th style="text-align:center">晋升候选</th>
+      <th style="text-align:center">下年度调薪建议</th>
     </tr>
   </thead>
-  <tbody>${employeeRows || '<tr><td colspan="8" style="text-align:center;color:#bfbfbf">暂无数据</td></tr>'}</tbody>
+  <tbody>${paEmployeeRows || '<tr><td colspan="10" style="text-align:center;color:#bfbfbf">暂无数据</td></tr>'}</tbody>
 </table>
 
 <div class="footer">
@@ -2928,6 +3047,8 @@ ${topGrowers && topGrowers.length > 0 ? `
     year: number,
     employeeIds?: string[]
   ): PromotionCandidateAnalysis[] {
+    syncAppliedCalibrationsToPerformanceHistory()
+
     const employees = employeeIds
       ? bonusStore.allEmployees.filter((e) => employeeIds.includes(e.id))
       : bonusStore.allEmployees
@@ -3374,6 +3495,53 @@ ${topGrowers && topGrowers.length > 0 ? `
     return addedCount
   }
 
+  function syncAppliedCalibrationsToPerformanceHistory(): number {
+    const calibrations = (bonusStore as any).calibrationResults as Array<{
+      id: string
+      year: number
+      half: 'first' | 'second' | 'annual'
+      status: string
+      appliedAt: string | null
+      employees: Array<{
+        employeeId: string
+        employeeName: string
+        departmentName: string
+        currentLevelId: string
+        currentLevelName: string
+        currentCoefficient: number
+        calibratedLevelId: string | null
+        calibratedLevelName: string | null
+        calibratedCoefficient: number | null
+      }>
+    }> | undefined
+
+    if (!calibrations || calibrations.length === 0) return 0
+
+    let totalAdded = 0
+    const appliedCals = calibrations.filter((c) => c.status === 'applied')
+
+    for (const cal of appliedCals) {
+      const employeesForHistory = cal.employees.map((emp) => ({
+        employeeId: emp.employeeId,
+        employeeName: emp.employeeName,
+        departmentName: emp.departmentName,
+        calibratedLevelId: emp.calibratedLevelId,
+        calibratedLevelName: emp.calibratedLevelName,
+        calibratedCoefficient: emp.calibratedCoefficient,
+        currentLevelId: emp.currentLevelId,
+        currentLevelName: emp.currentLevelName,
+        currentCoefficient: emp.currentCoefficient
+      }))
+      const added = addPerformanceRecordsFromCalibration(
+        cal.year,
+        cal.half,
+        employeesForHistory
+      )
+      totalAdded += added
+    }
+    return totalAdded
+  }
+
   return {
     reasons,
     approvalWorkflow,
@@ -3464,6 +3632,7 @@ ${topGrowers && topGrowers.length > 0 ? `
     analyzePromotionCandidates,
     generateNextYearSalaryRecommendations,
     buildPromotionAndAdjustmentReport,
-    addPerformanceRecordsFromCalibration
+    addPerformanceRecordsFromCalibration,
+    syncAppliedCalibrationsToPerformanceHistory
   }
 })
