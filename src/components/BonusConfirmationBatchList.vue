@@ -40,8 +40,8 @@
 <script setup lang="ts">
 import { ref, h, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
-import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined } from '@vicons/antd'
+import type { DataTableColumns, DropdownOption } from 'naive-ui'
+import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined, ExportOutlined } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import dayjs from 'dayjs'
 import type { BonusConfirmationBatch } from '@/types'
@@ -159,8 +159,10 @@ const columns: DataTableColumns<BonusConfirmationBatch> = [
   {
     title: '操作',
     key: 'actions',
-    width: 200,
+    width: 280,
     render: (row) => {
+      const vouchers = store.getVouchersByBatchId(row.id)
+      const hasVouchers = vouchers.length > 0
       return h('n-space', {}, {
         default: () => [
           h('n-button', {
@@ -172,6 +174,20 @@ const columns: DataTableColumns<BonusConfirmationBatch> = [
             icon: () => h(EyeOutlined),
             default: () => '查看'
           }),
+          hasVouchers ? h('n-dropdown', {
+            trigger: 'click',
+            options: getBatchExportOptions(row.id),
+            onSelect: (key: string | number) => handleBatchExport(row.id, key)
+          }, {
+            default: () => h('n-button', {
+              size: 'small',
+              type: 'success',
+              quaternary: true
+            }, {
+              icon: () => h(ExportOutlined),
+              default: () => '导出'
+            })
+          }) : null,
           row.status === 'draft' ? h('n-button', {
             size: 'small',
             type: 'success',
@@ -254,4 +270,47 @@ function handleDelete(batchId: string) {
 onMounted(() => {
   store.checkTimeouts()
 })
+
+function getBatchExportOptions(batchId: string): DropdownOption[] {
+  const vouchers = store.getVouchersByBatchId(batchId)
+  return [
+    {
+      label: '导出签收汇总表 (HTML打印)',
+      key: 'summary'
+    },
+    {
+      label: '导出签收汇总表 (Excel/CSV)',
+      key: 'csv'
+    },
+    {
+      label: `批量导出全部凭证 (${vouchers.length}份HTML)`,
+      key: 'all_html'
+    }
+  ]
+}
+
+function handleBatchExport(batchId: string, key: string | number) {
+  if (key === 'summary') {
+    const result = store.batchExportVouchersByBatch(batchId, 'summary')
+    if (result.success > 0) {
+      message.success('汇总表已打开，可打印或导出PDF')
+    } else {
+      message.error('导出失败')
+    }
+  } else if (key === 'csv') {
+    const result = store.batchExportVouchersByBatch(batchId, 'csv')
+    if (result.success > 0) {
+      message.success('CSV汇总表下载成功，可用Excel打开')
+    } else {
+      message.error('导出失败')
+    }
+  } else if (key === 'all_html') {
+    const result = store.batchExportVouchersByBatch(batchId, 'html')
+    if (result.success > 0) {
+      message.success(`已开始下载 ${result.success} 份凭证文件`)
+    } else {
+      message.error('导出失败')
+    }
+  }
+}
 </script>

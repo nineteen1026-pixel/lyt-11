@@ -30,6 +30,17 @@
                 <n-icon><SearchOutlined /></n-icon>
               </template>
             </n-input>
+            <n-dropdown
+              trigger="click"
+              :options="exportOptions"
+              @select="handleExportSelect"
+              :disabled="!canExport"
+            >
+              <n-button type="primary">
+                <template #icon><ExportOutlined /></template>
+                凭证导出
+              </n-button>
+            </n-dropdown>
           </n-space>
         </n-space>
       </template>
@@ -70,8 +81,8 @@
 <script setup lang="ts">
 import { ref, h, computed } from 'vue'
 import { useMessage } from 'naive-ui'
-import type { DataTableColumns, SelectOption } from 'naive-ui'
-import { ArrowLeftOutlined, SearchOutlined, EyeOutlined, BellOutlined } from '@vicons/antd'
+import type { DataTableColumns, DropdownOption, SelectOption } from 'naive-ui'
+import { ArrowLeftOutlined, SearchOutlined, EyeOutlined, BellOutlined, ExportOutlined, FileTextOutlined } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import type { BonusConfirmationRecord } from '@/types'
 import dayjs from 'dayjs'
@@ -225,10 +236,22 @@ const columns: DataTableColumns<BonusConfirmationRecord> = [
     width: 80
   },
   {
+    title: '凭证编号',
+    key: 'voucherNo',
+    width: 200,
+    render: (row) => {
+      if (row.status !== 'signed' || !row.signVoucherId) return '-'
+      const voucher = store.getVoucherById(row.signVoucherId)
+      if (!voucher) return '-'
+      return h('n-tag', { type: 'info', bordered: true }, { default: () => voucher.voucherNo })
+    }
+  },
+  {
     title: '操作',
     key: 'actions',
-    width: 180,
+    width: 240,
     render: (row) => {
+      const voucher = row.signVoucherId ? store.getVoucherById(row.signVoucherId) : null
       return h('n-space', {}, {
         default: () => [
           h('n-button', {
@@ -248,6 +271,15 @@ const columns: DataTableColumns<BonusConfirmationRecord> = [
           }, {
             icon: () => h(BellOutlined),
             default: () => '催办'
+          }) : null,
+          voucher ? h('n-button', {
+            size: 'small',
+            type: 'success',
+            quaternary: true,
+            onClick: () => handlePreviewVoucher(voucher.id)
+          }, {
+            icon: () => h(FileTextOutlined),
+            default: () => '凭证'
           }) : null
         ].filter(Boolean)
       })
@@ -261,6 +293,62 @@ function handleSendReminder(recordId: string) {
     message.success('已发送催办提醒')
   } else {
     message.error('催办失败')
+  }
+}
+
+const signedCount = computed(() => {
+  return confirmations.value.filter(c => c.status === 'signed').length
+})
+
+const canExport = computed(() => signedCount.value > 0)
+
+const exportOptions: DropdownOption[] = [
+  {
+    label: '导出签收汇总表 (HTML打印)',
+    key: 'summary',
+    disabled: false
+  },
+  {
+    label: '导出签收汇总表 (Excel/CSV)',
+    key: 'csv',
+    disabled: false
+  },
+  {
+    label: `批量导出全部凭证 (${signedCount.value}份HTML)`,
+    key: 'all_html',
+    disabled: signedCount.value === 0
+  }
+]
+
+function handleExportSelect(key: string | number) {
+  if (key === 'summary') {
+    const result = store.batchExportVouchersByBatch(props.batchId, 'summary')
+    if (result.success > 0) {
+      message.success('汇总表已打开，可打印或导出PDF')
+    } else {
+      message.error('导出失败，可能没有已签收的凭证')
+    }
+  } else if (key === 'csv') {
+    const result = store.batchExportVouchersByBatch(props.batchId, 'csv')
+    if (result.success > 0) {
+      message.success('CSV汇总表下载成功，可用Excel打开')
+    } else {
+      message.error('导出失败，可能没有已签收的凭证')
+    }
+  } else if (key === 'all_html') {
+    const result = store.batchExportVouchersByBatch(props.batchId, 'html')
+    if (result.success > 0) {
+      message.success(`已开始下载 ${result.success} 份凭证文件`)
+    } else {
+      message.error('导出失败，可能没有已签收的凭证')
+    }
+  }
+}
+
+function handlePreviewVoucher(voucherId: string) {
+  const ok = store.exportVoucherPdf(voucherId)
+  if (!ok) {
+    message.error('预览失败，请检查浏览器弹窗设置')
   }
 }
 </script>

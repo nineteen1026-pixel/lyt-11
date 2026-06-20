@@ -34,7 +34,8 @@ import type {
   CrossYearComparisonReport,
   MarketBenchmarkData,
   SalaryCompetitivenessAssessment,
-  CompetitivenessLevel
+  CompetitivenessLevel,
+  BonusSignVoucher
 } from '@/types'
 import { generateId, round2 } from '@/utils/tax'
 import dayjs from 'dayjs'
@@ -1343,6 +1344,7 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
     const perfHist = getEmployeePerformanceHistory(employeeId)
     const bonusHist = getEmployeeBonusPayments(employeeId)
     const approvalReqs = getEmployeeApprovalRequests(employeeId)
+    const signVouchers: BonusSignVoucher[] = bonusStore.getVouchersByEmployeeId(employeeId)
 
     const events: ArchiveTimelineEvent[] = []
 
@@ -1412,6 +1414,23 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       })
     })
 
+    signVouchers.forEach((v) => {
+      events.push({
+        id: `signvoucher_${v.id}`,
+        type: 'bonus_payment',
+        date: v.signedAt.slice(0, 10),
+        title: `${v.bonusName} - 签收凭证`,
+        description: `凭证编号：${v.voucherNo}，签收人：${v.signature}，税前 ${formatMoney(v.grossAmount)}，税后 ${formatMoney(v.netAmount)}`,
+        amount: v.netAmount,
+        amountLabel: '实发奖金',
+        status: '已签收',
+        statusColor: '#52c41a',
+        tags: [v.year.toString(), '签收凭证', v.batchName],
+        detail: v,
+        relatedRecordId: v.id
+      })
+    })
+
     events.sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
 
     const totalAdjustmentAmount = salaryHist.reduce((sum, h) => sum + h.adjustmentAmount, 0)
@@ -1431,6 +1450,7 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
       salaryHistory: salaryHist,
       bonusHistory: bonusHist,
       performanceHistory: perfHist,
+      bonusSignVouchers: signVouchers,
       summary: {
         totalSalaryAdjustments: salaryHist.length,
         totalAdjustmentAmount,
@@ -1439,7 +1459,8 @@ export const useSalaryAdjustmentStore = defineStore('salaryAdjustment', () => {
         totalBonusNet,
         performanceRecords: perfHist.length,
         currentLevel,
-        currentCoefficient
+        currentCoefficient,
+        totalBonusSignVouchers: signVouchers.length
       }
     }
   }

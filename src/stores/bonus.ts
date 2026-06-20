@@ -26,7 +26,8 @@ import type {
   BonusSandboxScenario,
   SandboxKeyMetrics,
   SandboxLevelDistribution,
-  EmployeeTagExpiryWarning
+  EmployeeTagExpiryWarning,
+  BonusSignVoucher
 } from '@/types'
 import {
   generateId,
@@ -1032,7 +1033,8 @@ export const useBonusStore = defineStore('bonus', () => {
       sandboxScenarios: sandboxScenarios.value,
       activeSandboxScenarioIds: activeSandboxScenarioIds.value,
       bonusConfirmations: bonusConfirmations.value,
-      bonusConfirmationBatches: bonusConfirmationBatches.value
+      bonusConfirmationBatches: bonusConfirmationBatches.value,
+      bonusSignVouchers: bonusSignVouchers.value
     }
   }
 
@@ -1067,6 +1069,7 @@ export const useBonusStore = defineStore('bonus', () => {
       }
       bonusConfirmations.value = data.bonusConfirmations || []
       bonusConfirmationBatches.value = data.bonusConfirmationBatches || []
+      bonusSignVouchers.value = data.bonusSignVouchers || []
       currentCalibration.value = null
       selectedEmployeeId.value = departments.value[0]?.employees[0]?.id || null
       return true
@@ -1325,6 +1328,15 @@ export const useBonusStore = defineStore('bonus', () => {
 
   const bonusConfirmations = ref<BonusConfirmationRecord[]>([])
   const bonusConfirmationBatches = ref<BonusConfirmationBatch[]>([])
+  const bonusSignVouchers = ref<BonusSignVoucher[]>([])
+
+  let voucherCounter = 0
+  function generateVoucherNo(year: number, batchName: string): string {
+    voucherCounter++
+    const batchCode = batchName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').slice(0, 4).toUpperCase() || 'BONUS'
+    const seq = voucherCounter.toString().padStart(6, '0')
+    return `BSV-${year}-${batchCode}-${seq}`
+  }
 
   function createConfirmationBatch(data: { name: string; year: number; bonusName: string; deadlineDays: number }): BonusConfirmationBatch {
     const batch: BonusConfirmationBatch = {
@@ -1392,13 +1404,30 @@ export const useBonusStore = defineStore('bonus', () => {
     const now = dayjs()
     for (const record of bonusConfirmations.value) {
       if (record.status === 'pending' && now.isAfter(dayjs(record.deadlineAt))) {
-        record.status = 'timeout'
-        const batch = bonusConfirmationBatches.value.find((b) => b.id === record.batchId)
-        if (batch) {
-          batch.pendingCount = Math.max(0, batch.pendingCount - 1)
-          batch.timeoutCount++
+        const prevStatus = record.status
+        record.status = 'signed'
+        record.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+        record.signature = record.employeeName
+        record.timeoutNotifiedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+        updateBatchStats(record.batchId, prevStatus, 'signed')
+        const voucher = createSignVoucher(record.id)
+        if (voucher) {
+          record.signVoucherId = voucher.id
         }
+        checkBatchCompletion(record.batchId)
       }
+    }
+  }
+
+  function checkBatchCompletion(batchId: string): void {
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+    if (!batch || batch.status !== 'published') return
+    const batchConfirmations = bonusConfirmations.value.filter((c) => c.batchId === batchId)
+    if (batchConfirmations.length === 0) return
+    const allProcessed = batchConfirmations.every((c) => c.status === 'signed')
+    if (allProcessed) {
+      batch.status = 'completed'
+      batch.completedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
   }
 
@@ -1467,7 +1496,43 @@ export const useBonusStore = defineStore('bonus', () => {
     record.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     record.signature = signatureName
     updateBatchStats(record.batchId, prevStatus, 'signed')
+    const voucher = createSignVoucher(recordId)
+    if (voucher) {
+      record.signVoucherId = voucher.id
+    }
+    checkBatchCompletion(record.batchId)
     return true
+  }
+
+  function createSignVoucher(recordId: string): BonusSignVoucher | null {
+    const record = getConfirmationById(recordId)
+    if (!record || record.status !== 'signed' || !record.signedAt || !record.signature) {
+      return null
+    }
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === record.batchId)
+    const voucher: BonusSignVoucher = {
+      id: generateId(),
+      confirmationRecordId: record.id,
+      batchId: record.batchId,
+      employeeId: record.employeeId,
+      employeeName: record.employeeName,
+      departmentName: record.departmentName,
+      position: record.position,
+      year: record.year,
+      bonusName: record.bonusName,
+      grossAmount: record.grossAmount,
+      taxAmount: record.taxAmount,
+      netAmount: record.netAmount,
+      taxMethod: record.taxMethod,
+      signature: record.signature,
+      signedAt: record.signedAt,
+      voucherNo: generateVoucherNo(record.year, batch?.name || ''),
+      generatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      archivedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      batchName: batch?.name || ''
+    }
+    bonusSignVouchers.value.push(voucher)
+    return voucher
   }
 
   function submitObjection(recordId: string, reason: string, description: string, attachments: string[]): boolean {
@@ -1513,6 +1578,15 @@ export const useBonusStore = defineStore('bonus', () => {
       record.taxAmount = adjustedAmounts.taxAmount
       record.netAmount = adjustedAmounts.netAmount
     }
+    record.status = 'signed'
+    record.signedAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    record.signature = record.employeeName
+    updateBatchStats(record.batchId, 'reviewing', 'signed')
+    const voucher = createSignVoucher(recordId)
+    if (voucher) {
+      record.signVoucherId = voucher.id
+    }
+    checkBatchCompletion(record.batchId)
     return true
   }
 
@@ -1522,6 +1596,423 @@ export const useBonusStore = defineStore('bonus', () => {
     record.reminderCount++
     record.lastReminderAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
     return true
+  }
+
+  function getVoucherById(voucherId: string): BonusSignVoucher | undefined {
+    return bonusSignVouchers.value.find((v) => v.id === voucherId)
+  }
+
+  function getVoucherByRecordId(recordId: string): BonusSignVoucher | undefined {
+    return bonusSignVouchers.value.find((v) => v.confirmationRecordId === recordId)
+  }
+
+  function getVouchersByEmployeeId(employeeId: string): BonusSignVoucher[] {
+    return bonusSignVouchers.value
+      .filter((v) => v.employeeId === employeeId)
+      .sort((a, b) => dayjs(b.signedAt).valueOf() - dayjs(a.signedAt).valueOf())
+  }
+
+  function getVouchersByBatchId(batchId: string): BonusSignVoucher[] {
+    return bonusSignVouchers.value
+      .filter((v) => v.batchId === batchId)
+      .sort((a, b) => dayjs(b.signedAt).valueOf() - dayjs(a.signedAt).valueOf())
+  }
+
+  function formatVoucherMoney(n: number): string {
+    return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  function generateVoucherHtml(voucher: BonusSignVoucher): string {
+    const taxMethodLabel = voucher.taxMethod === 'oneTime' ? '单独计税' : '综合计税'
+    const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>奖金签收凭证-${voucher.voucherNo}</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.8; font-size: 14px; background: #fff; }
+  .voucher-container { max-width: 720px; margin: 0 auto; }
+  .voucher-header { text-align: center; padding: 24px 0 16px; border-bottom: 2px solid #2080f0; margin-bottom: 24px; }
+  .voucher-header h1 { font-size: 24px; color: #2080f0; margin-bottom: 8px; }
+  .voucher-header .voucher-no { font-size: 13px; color: #8c8c8c; letter-spacing: 1px; }
+  .section-title { font-size: 16px; font-weight: 600; color: #262626; margin: 20px 0 12px; padding-left: 10px; border-left: 4px solid #2080f0; }
+  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .info-table td { padding: 10px 12px; border: 1px solid #e8e8e8; font-size: 13px; }
+  .info-table .label { background: #fafafa; color: #595959; width: 120px; font-weight: 500; }
+  .info-table .value { color: #262626; }
+  .amount-section { background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%); border-radius: 8px; padding: 24px; margin: 20px 0; }
+  .amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: center; }
+  .amount-item .amount-label { font-size: 13px; color: #8c8c8c; margin-bottom: 6px; }
+  .amount-item .amount-value { font-size: 22px; font-weight: 700; color: #262626; }
+  .amount-item.gross .amount-value { color: #1890ff; }
+  .amount-item.tax .amount-value { color: #f5222d; }
+  .amount-item.net .amount-value { color: #52c41a; }
+  .confirm-section { background: #fffbe6; border: 1px dashed #ffe58f; border-radius: 8px; padding: 20px; margin: 24px 0; }
+  .confirm-section .confirm-text { font-size: 14px; color: #8c8c8c; margin-bottom: 8px; }
+  .confirm-section .confirm-statement { font-size: 15px; color: #262626; line-height: 1.9; }
+  .signature-section { margin-top: 40px; padding-top: 24px; border-top: 1px solid #e8e8e8; }
+  .signature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .signature-item { text-align: center; }
+  .signature-item .signature-label { font-size: 13px; color: #8c8c8c; margin-bottom: 8px; }
+  .signature-item .signature-value { font-size: 20px; font-weight: 600; color: #262626; padding: 12px 0; border-bottom: 1px solid #262626; min-height: 48px; }
+  .signature-item .signature-date { font-size: 12px; color: #8c8c8c; margin-top: 6px; }
+  .watermark { text-align: center; color: #bfbfbf; font-size: 11px; margin-top: 40px; padding-top: 16px; border-top: 1px dashed #e8e8e8; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<div class="voucher-container">
+  <div class="voucher-header">
+    <h1>奖金电子签收凭证</h1>
+    <div class="voucher-no">凭证编号：${voucher.voucherNo}</div>
+  </div>
+
+  <div class="section-title">员工信息</div>
+  <table class="info-table">
+    <tr>
+      <td class="label">员工姓名</td>
+      <td class="value"><strong>${voucher.employeeName}</strong></td>
+      <td class="label">所属部门</td>
+      <td class="value">${voucher.departmentName}</td>
+    </tr>
+    <tr>
+      <td class="label">职　　位</td>
+      <td class="value">${voucher.position}</td>
+      <td class="label">奖金属期</td>
+      <td class="value">${voucher.year}年度</td>
+    </tr>
+  </table>
+
+  <div class="section-title">奖金信息</div>
+  <table class="info-table">
+    <tr>
+      <td class="label">奖金名称</td>
+      <td class="value"><strong>${voucher.bonusName}</strong></td>
+      <td class="label">所属批次</td>
+      <td class="value">${voucher.batchName}</td>
+    </tr>
+    <tr>
+      <td class="label">计税方式</td>
+      <td class="value">${taxMethodLabel}</td>
+      <td class="label">生成时间</td>
+      <td class="value">${voucher.generatedAt}</td>
+    </tr>
+  </table>
+
+  <div class="section-title">奖金金额明细</div>
+  <div class="amount-section">
+    <div class="amount-grid">
+      <div class="amount-item gross">
+        <div class="amount-label">税前奖金总额</div>
+        <div class="amount-value">${formatVoucherMoney(voucher.grossAmount)}</div>
+      </div>
+      <div class="amount-item tax">
+        <div class="amount-label">应扣个人所得税</div>
+        <div class="amount-value">${formatVoucherMoney(voucher.taxAmount)}</div>
+      </div>
+      <div class="amount-item net">
+        <div class="amount-label">税后实发奖金</div>
+        <div class="amount-value">${formatVoucherMoney(voucher.netAmount)}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-section">
+    <div class="confirm-text">签收确认声明：</div>
+    <div class="confirm-statement">
+      本人已仔细核对上述奖金明细，确认奖金金额计算方式、计税方式及最终金额均准确无误，无任何异议。
+      本人同意按照上述金额领取奖金，并确认此电子签收凭证具有与纸质签收同等法律效力。
+    </div>
+  </div>
+
+  <div class="signature-section">
+    <div class="signature-grid">
+      <div class="signature-item">
+        <div class="signature-label">员工电子签名</div>
+        <div class="signature-value">${voucher.signature}</div>
+        <div class="signature-date">签收日期：${voucher.signedAt}</div>
+      </div>
+      <div class="signature-item">
+        <div class="signature-label">归档状态</div>
+        <div class="signature-value" style="font-size:16px;color:#52c41a">已归档 ✓</div>
+        <div class="signature-date">归档日期：${voucher.archivedAt}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="watermark">
+    本凭证由系统自动生成 · 生成时间 ${now} · 凭证编号 ${voucher.voucherNo}
+  </div>
+</div>
+</body>
+</html>`
+  }
+
+  function exportVoucherPdf(voucherId: string): boolean {
+    const voucher = getVoucherById(voucherId)
+    if (!voucher) return false
+    const html = generateVoucherHtml(voucher)
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return false
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.onload = () => {
+      printWindow.document.title = `奖金签收凭证-${voucher.voucherNo}`
+      setTimeout(() => {
+        printWindow.print()
+      }, 300)
+    }
+    return true
+  }
+
+  function exportVoucherHtml(voucherId: string): boolean {
+    const voucher = getVoucherById(voucherId)
+    if (!voucher) return false
+    const html = generateVoucherHtml(voucher)
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `奖金签收凭证_${voucher.employeeName}_${voucher.voucherNo}.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    return true
+  }
+
+  function batchExportVouchersByBatch(batchId: string, format: 'html' | 'summary' | 'csv' | 'all_csv' = 'html'): { success: number; total: number } {
+    const vouchers = getVouchersByBatchId(batchId)
+    if (vouchers.length === 0) return { success: 0, total: 0 }
+
+    if (format === 'summary') {
+      const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+      const summaryHtml = generateBatchSummaryHtml(batchId, vouchers, batch)
+      const blob = new Blob([summaryHtml], { type: 'text/html;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `奖金签收汇总_${batch?.name || batchId}_${dayjs().format('YYYYMMDD')}.html`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return { success: vouchers.length, total: vouchers.length }
+    }
+
+    if (format === 'csv' || format === 'all_csv') {
+      const csv = generateBatchSummaryCsv(batchId, vouchers)
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+      a.href = url
+      a.download = `奖金签收汇总表_${batch?.name || batchId}_${dayjs().format('YYYYMMDD')}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return { success: vouchers.length, total: vouchers.length }
+    }
+
+    let successCount = 0
+    vouchers.forEach((voucher, index) => {
+      setTimeout(() => {
+        const html = generateVoucherHtml(voucher)
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `奖金签收凭证_${String(index + 1).padStart(3, '0')}_${voucher.employeeName}_${voucher.voucherNo}.html`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, index * 200)
+      successCount++
+    })
+    return { success: successCount, total: vouchers.length }
+  }
+
+  function generateBatchSummaryCsv(batchId: string, vouchers: BonusSignVoucher[]): string {
+    const batch = bonusConfirmationBatches.value.find((b) => b.id === batchId)
+    const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    const totalGross = vouchers.reduce((s, v) => s + v.grossAmount, 0)
+    const totalTax = vouchers.reduce((s, v) => s + v.taxAmount, 0)
+    const totalNet = vouchers.reduce((s, v) => s + v.netAmount, 0)
+
+    const escapeCsv = (val: any): string => {
+      if (val === null || val === undefined) return ''
+      const str = String(val)
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      return str
+    }
+
+    const lines: string[] = []
+
+    lines.push('奖金签收凭证汇总表')
+    lines.push(`生成时间,${escapeCsv(now)}`)
+    lines.push(`批次名称,${escapeCsv(batch?.name || '-')}`)
+    lines.push(`奖金名称,${escapeCsv(batch?.bonusName || '-')}`)
+    lines.push(`年度,${escapeCsv(batch?.year || '-')}`)
+    lines.push(`发布时间,${escapeCsv(batch?.publishedAt?.slice(0, 10) || '-')}`)
+    lines.push('')
+    lines.push(`签收凭证数量,${vouchers.length}`)
+    lines.push(`税前奖金合计,${escapeCsv(formatVoucherMoney(totalGross))}`)
+    lines.push(`个税合计,${escapeCsv(formatVoucherMoney(totalTax))}`)
+    lines.push(`税后实发合计,${escapeCsv(formatVoucherMoney(totalNet))}`)
+    lines.push('')
+    lines.push('序号,凭证编号,员工姓名,部门,职位,税前金额,个税,税后实发,计税方式,签收人,签收日期,归档日期,所属批次,奖金名称,年度')
+
+    vouchers.forEach((v, i) => {
+      lines.push([
+        i + 1,
+        escapeCsv(v.voucherNo),
+        escapeCsv(v.employeeName),
+        escapeCsv(v.departmentName),
+        escapeCsv(v.position),
+        escapeCsv(formatVoucherMoney(v.grossAmount)),
+        escapeCsv(formatVoucherMoney(v.taxAmount)),
+        escapeCsv(formatVoucherMoney(v.netAmount)),
+        escapeCsv(v.taxMethod === 'oneTime' ? '单独计税' : '综合计税'),
+        escapeCsv(v.signature),
+        escapeCsv(v.signedAt?.slice(0, 10) || '-'),
+        escapeCsv(v.archivedAt?.slice(0, 10) || '-'),
+        escapeCsv(v.batchName),
+        escapeCsv(v.bonusName),
+        v.year
+      ].join(','))
+    })
+
+    return lines.join('\n')
+  }
+
+  function generateBatchSummaryHtml(batchId: string, vouchers: BonusSignVoucher[], batch?: BonusConfirmationBatch): string {
+    const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
+    const totalGross = vouchers.reduce((s, v) => s + v.grossAmount, 0)
+    const totalTax = vouchers.reduce((s, v) => s + v.taxAmount, 0)
+    const totalNet = vouchers.reduce((s, v) => s + v.netAmount, 0)
+
+    const rows = vouchers.map((v, i) => `
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${v.voucherNo}</td>
+        <td>${v.employeeName}</td>
+        <td>${v.departmentName}</td>
+        <td>${v.position}</td>
+        <td style="text-align:right">${formatVoucherMoney(v.grossAmount)}</td>
+        <td style="text-align:right;color:#f5222d">${formatVoucherMoney(v.taxAmount)}</td>
+        <td style="text-align:right;color:#52c41a;font-weight:600">${formatVoucherMoney(v.netAmount)}</td>
+        <td>${v.taxMethod === 'oneTime' ? '单独' : '综合'}</td>
+        <td>${v.signature}</td>
+        <td>${v.signedAt?.slice(0, 10) || '-'}</td>
+      </tr>
+    `).join('')
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>奖金签收汇总-${batch?.name || batchId}</title>
+<style>
+  @page { size: A4 landscape; margin: 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #262626; line-height: 1.6; font-size: 12px; }
+  .header { text-align: center; padding: 20px 0 16px; border-bottom: 2px solid #2080f0; margin-bottom: 20px; }
+  .header h1 { font-size: 22px; color: #2080f0; margin-bottom: 6px; }
+  .header p { color: #8c8c8c; font-size: 12px; }
+  .batch-info { background: #f6f8fa; border-radius: 8px; padding: 16px 24px; margin-bottom: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .info-item .label { color: #8c8c8c; font-size: 12px; margin-bottom: 2px; }
+  .info-item .value { font-weight: 600; font-size: 14px; }
+  .summary-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat-card { padding: 16px; border-radius: 8px; text-align: center; }
+  .stat-card.sc-count { background: #e6f7ff; }
+  .stat-card.sc-gross { background: #bae7ff; }
+  .stat-card.sc-tax { background: #fff1f0; }
+  .stat-card.sc-net { background: #f6ffed; }
+  .stat-card .label { font-size: 12px; color: #8c8c8c; margin-bottom: 4px; }
+  .stat-card .value { font-size: 20px; font-weight: 700; }
+  h2 { font-size: 16px; margin: 20px 0 10px; padding-left: 8px; border-left: 3px solid #2080f0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+  th, td { border: 1px solid #e8e8e8; padding: 6px 8px; text-align: left; white-space: nowrap; }
+  th { background: #fafafa; font-weight: 600; color: #595959; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .total-row td { background: #fffbe6 !important; font-weight: 600; }
+  .footer { text-align: center; color: #bfbfbf; font-size: 11px; margin-top: 32px; padding-top: 12px; border-top: 1px solid #e8e8e8; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>奖金签收凭证汇总表</h1>
+  <p>生成时间：${now}</p>
+</div>
+
+<div class="batch-info">
+  <div class="info-item"><div class="label">批次名称</div><div class="value">${batch?.name || '-'}</div></div>
+  <div class="info-item"><div class="label">奖金名称</div><div class="value">${batch?.bonusName || '-'}</div></div>
+  <div class="info-item"><div class="label">年度</div><div class="value">${batch?.year || '-'}</div></div>
+  <div class="info-item"><div class="label">发布时间</div><div class="value">${batch?.publishedAt?.slice(0, 10) || '-'}</div></div>
+</div>
+
+<div class="summary-stats">
+  <div class="stat-card sc-count">
+    <div class="label">签收凭证数量</div>
+    <div class="value">${vouchers.length} 份</div>
+  </div>
+  <div class="stat-card sc-gross">
+    <div class="label">税前奖金合计</div>
+    <div class="value">${formatVoucherMoney(totalGross)}</div>
+  </div>
+  <div class="stat-card sc-tax">
+    <div class="label">个税合计</div>
+    <div class="value" style="color:#f5222d">${formatVoucherMoney(totalTax)}</div>
+  </div>
+  <div class="stat-card sc-net">
+    <div class="label">税后实发合计</div>
+    <div class="value" style="color:#52c41a">${formatVoucherMoney(totalNet)}</div>
+  </div>
+</div>
+
+<h2>签收凭证明细</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:40px">序号</th>
+      <th>凭证编号</th>
+      <th>员工姓名</th>
+      <th>部门</th>
+      <th>职位</th>
+      <th style="width:100px">税前金额</th>
+      <th style="width:100px">个税</th>
+      <th style="width:100px">税后实发</th>
+      <th style="width:60px">计税</th>
+      <th>签收人</th>
+      <th style="width:100px">签收日期</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rows || '<tr><td colspan="11" style="text-align:center;color:#bfbfbf">暂无记录</td></tr>'}
+    <tr class="total-row">
+      <td colspan="5" style="text-align:center">合　计</td>
+      <td style="text-align:right">${formatVoucherMoney(totalGross)}</td>
+      <td style="text-align:right;color:#f5222d">${formatVoucherMoney(totalTax)}</td>
+      <td style="text-align:right;color:#52c41a">${formatVoucherMoney(totalNet)}</td>
+      <td colspan="3"></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footer">
+  本文档由「年终奖模拟器」系统自动生成 · ${now}
+</div>
+</body>
+</html>`
   }
 
   function getTimeoutWarnings(): TimeoutWarning[] {
@@ -1908,6 +2399,7 @@ export const useBonusStore = defineStore('bonus', () => {
     versionApprovalRecords,
     bonusConfirmations,
     bonusConfirmationBatches,
+    bonusSignVouchers,
     sandboxScenarios,
     activeSandboxScenarioIds,
     activeSandboxScenarios,
@@ -1967,10 +2459,22 @@ export const useBonusStore = defineStore('bonus', () => {
     getConfirmationStatusLabel,
     getConfirmationStatusColor,
     signBonus,
+    createSignVoucher,
     submitObjection,
     startReview,
     completeReview,
     sendReminder,
+    getVoucherById,
+    getVoucherByRecordId,
+    getVouchersByEmployeeId,
+    getVouchersByBatchId,
+    generateVoucherHtml,
+    exportVoucherPdf,
+    exportVoucherHtml,
+    batchExportVouchersByBatch,
+    generateBatchSummaryHtml,
+    generateBatchSummaryCsv,
+    checkBatchCompletion,
     getTimeoutWarnings,
     createSandboxScenario,
     duplicateSandboxScenario,

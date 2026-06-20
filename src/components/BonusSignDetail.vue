@@ -86,7 +86,28 @@
         <n-descriptions-item label="签收时间">
           {{ record.signedAt }}
         </n-descriptions-item>
+        <n-descriptions-item v-if="voucher" label="凭证编号">
+          <n-tag type="info" bordered>{{ voucher.voucherNo }}</n-tag>
+        </n-descriptions-item>
+        <n-descriptions-item v-if="voucher" label="归档时间">
+          {{ voucher.archivedAt }}
+        </n-descriptions-item>
       </n-descriptions>
+      <n-divider style="margin: 16px 0" />
+      <n-space v-if="voucher" justify="end">
+        <n-button type="primary" ghost @click="handlePreviewVoucher">
+          <template #icon><FileTextOutlined /></template>
+          预览凭证
+        </n-button>
+        <n-button type="primary" @click="handleDownloadPdf">
+          <template #icon><PrinterOutlined /></template>
+          导出PDF
+        </n-button>
+        <n-button type="success" @click="handleDownloadHtml">
+          <template #icon><DownloadOutlined /></template>
+          下载凭证
+        </n-button>
+      </n-space>
     </n-card>
 
     <n-card v-if="record && record.objection" title="异议信息">
@@ -217,7 +238,10 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   UploadOutlined,
-  PaperClipOutlined
+  PaperClipOutlined,
+  FileTextOutlined,
+  PrinterOutlined,
+  DownloadOutlined
 } from '@vicons/antd'
 import { useBonusStore } from '@/stores/bonus'
 import type { UploadFileInfo } from 'naive-ui'
@@ -274,6 +298,48 @@ const statusColor = computed(() => {
   if (!record.value) return '#8c8c8c'
   return store.getConfirmationStatusColor(record.value.status)
 })
+
+const voucher = computed(() => {
+  if (!record.value) return null
+  return store.getVoucherByRecordId(record.value.id) || null
+})
+
+function handlePreviewVoucher() {
+  if (!voucher.value) {
+    message.warning('凭证不存在')
+    return
+  }
+  const ok = store.exportVoucherPdf(voucher.value.id)
+  if (!ok) {
+    message.error('预览失败，请检查浏览器弹窗设置')
+  }
+}
+
+function handleDownloadPdf() {
+  if (!voucher.value) {
+    message.warning('凭证不存在')
+    return
+  }
+  const ok = store.exportVoucherPdf(voucher.value.id)
+  if (ok) {
+    message.info('已打开打印预览，可另存为 PDF 文件')
+  } else {
+    message.error('导出失败，请检查浏览器弹窗设置')
+  }
+}
+
+function handleDownloadHtml() {
+  if (!voucher.value) {
+    message.warning('凭证不存在')
+    return
+  }
+  const ok = store.exportVoucherHtml(voucher.value.id)
+  if (ok) {
+    message.success('凭证下载成功')
+  } else {
+    message.error('下载失败')
+  }
+}
 
 function handleSign() {
   if (!signatureName.value.trim()) {

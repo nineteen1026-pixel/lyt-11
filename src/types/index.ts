@@ -209,6 +209,7 @@ export interface AppData {
   activeSandboxScenarioIds?: string[]
   bonusConfirmations?: BonusConfirmationRecord[]
   bonusConfirmationBatches?: BonusConfirmationBatch[]
+  bonusSignVouchers?: BonusSignVoucher[]
 }
 
 export type AdjustmentReasonCategory =
@@ -439,6 +440,7 @@ export interface EmployeeCompensationArchive {
   salaryHistory: SalaryHistoryRecord[]
   bonusHistory: BonusPaymentRecord[]
   performanceHistory: PerformanceHistoryRecord[]
+  bonusSignVouchers: BonusSignVoucher[]
   summary: {
     totalSalaryAdjustments: number
     totalAdjustmentAmount: number
@@ -448,6 +450,7 @@ export interface EmployeeCompensationArchive {
     performanceRecords: number
     currentLevel: string
     currentCoefficient: number
+    totalBonusSignVouchers: number
   }
 }
 
@@ -504,6 +507,35 @@ export interface BonusConfirmationRecord {
   lastReminderAt?: string
   year: number
   bonusName: string
+  signVoucherId?: string
+}
+
+export interface BonusSignVoucher {
+  id: string
+  confirmationRecordId: string
+  batchId: string
+  employeeId: string
+  employeeName: string
+  departmentName: string
+  position: string
+  year: number
+  bonusName: string
+  grossAmount: number
+  taxAmount: number
+  netAmount: number
+  taxMethod: TaxMethod
+  signature: string
+  signedAt: string
+  voucherNo: string
+  generatedAt: string
+  archivedAt: string
+  batchName: string
+}
+
+export interface BonusSignVoucherExportOptions {
+  format: 'pdf' | 'zip' | 'excel'
+  includeVouchers: boolean
+  includeSummary: boolean
 }
 
 export interface BonusConfirmationBatch {
